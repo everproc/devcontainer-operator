@@ -1,0 +1,10 @@
+apiVersion: devcontainer.everproc.com/v1alpha1
+kind: Source
+metadata:
+  labels:
+    app.kubernetes.io/name: devcontainer
+    app.kubernetes.io/managed-by: kustomize
+  name: daemonfire300-template-starter
+spec:
+  gitUrl: 'https://github.com/daemonfire300/template-starter.git'
+  # TODO(user): Add fields here

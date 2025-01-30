@@ -1,0 +1,23 @@
+# permissions for end users to view definitions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: devcontainer
+    app.kubernetes.io/managed-by: kustomize
+  name: definition-viewer-role
+rules:
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - definitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - definitions/status
+  verbs:
+  - get

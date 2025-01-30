@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- devcontainer_v1alpha1_source.yaml
+- devcontainer_v1alpha1_definition.yaml
+- devcontainer_v1alpha1_workspace.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
