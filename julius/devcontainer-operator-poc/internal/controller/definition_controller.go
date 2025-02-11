@@ -21,7 +21,6 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,12 +43,12 @@ const UtilRoleName = "devcontainer-utility"
 const UtilRoleBindingName = UtilRoleName
 const UtilServiceAccountName = UtilRoleName
 
-var LabelDefinitionMapKey = strings.ReplaceAll(devcontainerv1alpha1.SchemeBuilder.GroupVersion.String()+"/definitionID", "/", ".")
+var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.String() + "/definitionID"
 
 func init() {
 	res := validation.IsQualifiedName(LabelDefinitionMapKey)
 	if res != nil {
-		panic(fmt.Sprintf("Invalid LabelDefinitionMapKey: %v", res))
+		panic(fmt.Sprintf("Invalid LabelDefinitionMapKey %q: %v", LabelDefinitionMapKey, res))
 	}
 }
 
@@ -109,7 +108,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.Error(err, "Failed to construct PVC spec")
 				return ctrl.Result{}, err
 			}
-			attachDefinitionIDLabel(pvc, definitionID)
+			AttachDefinitionIDLabel(pvc, definitionID)
 			err = r.Create(ctx, pvc)
 			if err != nil {
 				log.Error(err, "Failed to create PVC")
@@ -156,7 +155,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.Error(err, "Failed to construct clone pod spec")
 				return ctrl.Result{}, err
 			}
-			attachDefinitionIDLabel(pod, definitionID)
+			AttachDefinitionIDLabel(pod, definitionID)
 			err = r.Create(ctx, pod)
 			if err != nil {
 				log.Error(err, "Failed to create clone pod")
@@ -206,7 +205,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.Error(err, "Failed to construct parse pod spec")
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, err
 			}
-			attachDefinitionIDLabel(pod, definitionID)
+			AttachDefinitionIDLabel(pod, definitionID)
 			err = r.Create(ctx, pod)
 			if err != nil {
 				log.Error(err, "Failed to create parse pod")
@@ -398,13 +397,21 @@ func (r *DefinitionReconciler) ensureResource(ctx context.Context, obj client.Ob
 	return nil
 }
 
-func attachDefinitionIDLabel(resource client.Object, definitionID string) {
+func AttachDefinitionIDLabel(resource client.Object, definitionID string) {
 	m := resource.GetLabels()
 	if m == nil {
 		m = make(map[string]string)
 	}
 	m[LabelDefinitionMapKey] = definitionID
 	resource.SetLabels(m)
+}
+
+func GetDefinitionIDLabel(resource client.Object) string {
+	m := resource.GetLabels()
+	if m == nil {
+		m = make(map[string]string)
+	}
+	return m[LabelDefinitionMapKey]
 }
 
 func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definition) (*corev1.PersistentVolumeClaim, error) {

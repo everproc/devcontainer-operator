@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -37,6 +38,9 @@ type DefinitionSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:printcolumn:JSONPath="spec.gitHashOrTag",name=GitHashOrTag,type=string
 	GitHashOrTag string `json:"gitHashOrTag"`
+
+	// +kubebuilder:validation:Optional
+	PodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
 
 	// +kubebuilder:validation:Optional
 	RawDefinition string `json:"definition"`

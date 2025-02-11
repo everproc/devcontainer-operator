@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -146,6 +147,17 @@ func main() {
 	targetDefinition.Spec.Run.Args = orEmptySlice(devContainerSpec.RunArgs)
 	targetDefinition.Spec.Image = devContainerSpec.Image
 	targetDefinition.Spec.RawDefinition = string(data)
+	targetDefinition.Spec.PodTpl = &corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Image:           devContainerSpec.Image,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+				},
+			},
+		},
+	}
+
 	if err := kubeClient.Update(ctx, targetDefinition); err != nil {
 		fmt.Printf("Failed to create ParsedData: %v\n", err)
 		os.Exit(1)
