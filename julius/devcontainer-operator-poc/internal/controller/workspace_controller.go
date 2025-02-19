@@ -33,7 +33,7 @@ import (
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
 )
 
-var WorkspacePodLabelKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.String() + "/workspaceRef"
+var WorkspacePodLabelKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/workspaceRef"
 
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
@@ -76,7 +76,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// TODO (juf): Assert this is non-empty
 	definitionID := GetDefinitionIDLabel(def)
 
-	depl := createDeployment(instance, def.Spec.PodTpl, definitionID)
+	depl := createDeployment(instance, def.Parsed.PodTpl, definitionID)
 	err = r.ensureResource(ctx, depl)
 	if err != nil {
 		return ctrl.Result{}, err

@@ -26,11 +26,9 @@ type WorkspaceSpec struct {
 	// DefinitionSpecTemplate DefinitionSpecTemplate `json:"definition_spec_template"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.owner",name=Owner,type=string
 	Owner string `json:"owner"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.definition_ref",name=DefinitionRef,type=string
 	DefinitionRef string `json:"definition_ref"`
 }
 
@@ -61,6 +59,9 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status['Ready'].status"
+// +kubebuilder:printcolumn:JSONPath=".spec.owner",name=Owner,type=string
+// +kubebuilder:printcolumn:JSONPath=".spec.definition_ref",name=DefinitionRef,type=string
 
 // Workspace is the Schema for the workspaces API.
 type Workspace struct {

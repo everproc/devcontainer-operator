@@ -143,11 +143,15 @@ func main() {
 
 	targetDefinition.Name = k8sResourceName // Set the name of the resource
 	targetDefinition.Namespace = namespace  // Set the namespace
-	targetDefinition.Spec.Build = devcontainerv1alpha1.BuildSpec(devContainerSpec.Build)
-	targetDefinition.Spec.Run.Args = orEmptySlice(devContainerSpec.RunArgs)
-	targetDefinition.Spec.Image = devContainerSpec.Image
-	targetDefinition.Spec.RawDefinition = string(data)
-	targetDefinition.Spec.PodTpl = &corev1.PodTemplateSpec{
+	targetDefinition.Parsed = devcontainerv1alpha1.ParsedDefinition{
+		Image: devContainerSpec.Image,
+		Build: devcontainerv1alpha1.BuildSpec(devContainerSpec.Build),
+		Run: devcontainerv1alpha1.RunSpec{
+			Args: orEmptySlice(devContainerSpec.RunArgs),
+		},
+		RawDefinition: string(data),
+	}
+	targetDefinition.Parsed.PodTpl = &corev1.PodTemplateSpec{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{

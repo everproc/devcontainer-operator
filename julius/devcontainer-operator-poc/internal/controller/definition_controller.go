@@ -43,7 +43,7 @@ const UtilRoleName = "devcontainer-utility"
 const UtilRoleBindingName = UtilRoleName
 const UtilServiceAccountName = UtilRoleName
 
-var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.String() + "/definitionID"
+var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
 
 func init() {
 	res := validation.IsQualifiedName(LabelDefinitionMapKey)
@@ -94,33 +94,54 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	definitionID := definitionID(instance, src)
-
-	pvc := &corev1.PersistentVolumeClaim{}
-	err = r.Get(ctx, types.NamespacedName{Name: r.pvcName(instance), Namespace: instance.Namespace}, pvc)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Not found, let's schedule a PVC for creation")
-			if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
-				return ctrl.Result{}, err
-			}
-			pvc, err := r.pvcForGitRepo(instance)
-			if err != nil {
-				log.Error(err, "Failed to construct PVC spec")
-				return ctrl.Result{}, err
-			}
-			AttachDefinitionIDLabel(pvc, definitionID)
-			err = r.Create(ctx, pvc)
-			if err != nil {
-				log.Error(err, "Failed to create PVC")
-				return ctrl.Result{}, err
-			}
-			// TODO (juf): make configurable
-			return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+	previousDefinitionID := GetDefinitionIDLabel(instance)
+	if previousDefinitionID == "" {
+		log.Info("Definiton does not have a git hash based ID yet")
+	} else {
+		if previousDefinitionID != definitionID {
+			log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
 		} else {
-			log.Error(err, "Failed to get pvc info")
-			return ctrl.Result{}, err
+			log.Info("Definiton ID did not change")
 		}
 	}
+	AttachDefinitionIDLabel(instance, definitionID)
+	r.Update(ctx, instance)
+
+	pvcRes, err := r.ensurePvc(ctx, instance, definitionID)
+	if err != nil {
+		return pvcRes, err
+	} else {
+		if !pvcRes.IsZero() {
+			return pvcRes, nil
+		}
+	}
+
+	//pvc := &corev1.PersistentVolumeClaim{}
+	//err = r.Get(ctx, types.NamespacedName{Name: r.pvcName(instance), Namespace: instance.Namespace}, pvc)
+	//if err != nil {
+	//	if apierrors.IsNotFound(err) {
+	//		log.Info("Not found, let's schedule a PVC for creation")
+	//		if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
+	//			return ctrl.Result{}, err
+	//		}
+	//		pvc, err := r.pvcForGitRepo(instance)
+	//		if err != nil {
+	//			log.Error(err, "Failed to construct PVC spec")
+	//			return ctrl.Result{}, err
+	//		}
+	//		AttachDefinitionIDLabel(pvc, definitionID)
+	//		err = r.Create(ctx, pvc)
+	//		if err != nil {
+	//			log.Error(err, "Failed to create PVC")
+	//			return ctrl.Result{}, err
+	//		}
+	//		// TODO (juf): make configurable
+	//		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+	//	} else {
+	//		log.Error(err, "Failed to get pvc info")
+	//		return ctrl.Result{}, err
+	//	}
+	//}
 
 	// TODO (juf): The PVC will not be bound until we have a pod assigned to it and no PV will be there based on the storageclass,
 	// e.g., on kind (local) the behaviour is something like WaitForConsumer. Therefore this code needs to also handle this
@@ -231,6 +252,52 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	ownedPVCs := &corev1.PersistentVolumeClaimList{}
+	// Let's hope this works.
+	// Why are we doing this?
+	// We want to remove any outdated deployments when the definitionID changes
+	err := r.List(ctx, ownedPVCs, client.MatchingFields{
+		"metadata.ownerReferences.kind": instance.Kind,
+		"metadata.ownerReferences.name": instance.Name,
+	})
+	// If size equals 0, we have to create the PVC
+	// if size equals 1, we need to check if the definitionID label matches, if it does, everything is fine, else schedule the PVC and delete the old PVC
+	// if size is greater than 1 we need to clean up
+	if len(ownedPVCs.Items) == 0 {
+		log.Info("Not found, let's schedule a PVC for creation")
+		if err := r.updateStatus(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
+			return ctrl.Result{}, err
+		}
+		pvc, err := r.pvcForGitRepo(instance)
+		if err != nil {
+			log.Error(err, "Failed to construct PVC spec")
+			return ctrl.Result{}, err
+		}
+		AttachDefinitionIDLabel(pvc, definitionID)
+		err = r.Create(ctx, pvc)
+		if err != nil {
+			log.Error(err, "Failed to create PVC")
+			return ctrl.Result{}, err
+		}
+		// TODO (juf): make configurable
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+	} else if len(ownedPVCs.Items) > 1 {
+		for _, d := range ownedPVCs.Items {
+			id := GetDefinitionIDLabel(&d)
+			if id == "" || id != definitionID {
+				err = r.Delete(ctx, &d)
+				if err != nil {
+					log.Error(err, "Failed to delete old deployment", "deploymentName", d.Name)
+					return ctrl.Result{}, err
+				}
+			}
+		}
+	}
+	return ctrl.Result{}, err
 }
 
 func definitionID(instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) string {

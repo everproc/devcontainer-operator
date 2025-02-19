@@ -33,12 +33,11 @@ type RunSpec struct {
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
 	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.source",name=Source,type=string
 	Source string `json:"source"`
 	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.gitHashOrTag",name=GitHashOrTag,type=string
 	GitHashOrTag string `json:"gitHashOrTag"`
-
+}
+type ParsedDefinition struct {
 	// +kubebuilder:validation:Optional
 	PodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
 
@@ -85,6 +84,9 @@ type DefinitionStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[?(@.type=='Parsed')].reason"
+// +kubebuilder:printcolumn:JSONPath=".spec.gitHashOrTag",name=GitHashOrTag,type=string
+// +kubebuilder:printcolumn:JSONPath=".spec.source",name=Source,type=string
 
 // Definition is the Schema for the definitions API.
 type Definition struct {
@@ -92,6 +94,7 @@ type Definition struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   DefinitionSpec   `json:"spec,omitempty"`
+	Parsed ParsedDefinition `json:"pasedDefinition,omitempty"`
 	Status DefinitionStatus `json:"status,omitempty"`
 }
 
