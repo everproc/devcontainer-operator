@@ -158,10 +158,16 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
-build-and-push-utilities:
+build-parser:
 	docker build -f Dockerfile.parserapp . -t parserapp:0.0.1
-	kind load docker-image parserapp:0.0.1 parserapp:0.0.1
+
+build-git-clone:
 	docker build -f Dockerfile.gitclone . -t git-clone:0.0.1
+
+build-utilities: build-parser build-git-clone
+
+build-and-push-utilities: build-utilities
+	kind load docker-image parserapp:0.0.1 parserapp:0.0.1
 	kind load docker-image git-clone:0.0.1 git-clone:0.0.1
 
 ##@ Dependencies

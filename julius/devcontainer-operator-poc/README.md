@@ -1,16 +1,31 @@
-# devcontainer
-// TODO(user): Add simple overview of use/purpose
+# devcontainer-light controller
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+This controller provisions devcontainer-light pods on demand.
+
+devcontainer-light means it does not support the full devcontainer spec and feature set.
+What the controller essentially provides is the most essential features of the spec,
+like a pod provisioned with the given image and PostCreateCommand and the specified ports exposed at the containter
+level.
+
+Using `features` from the spec is not supported.
+Using a Dockerfile is currently also not supported, you have to pre-build your images.
+The repository that owns the .devcontainer will _always_ be mounted at `/workspace`.
 
 ## Getting Started
+
+**NOTE:** Parts of the README are still from the kubebuilder boilerplate keep this in mind.
 
 ### Prerequisites
 - go version v1.22.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
+
+If you are running this locally using kind: run `make build-and-push-utilities` before you attempt to create any resources.
+If you are running this locally not using kind: run `build-utilities`, you then need to make sure that the resulting two images are put somewhere where the cluster can pull it from.
+Currently you might need to even adjust the code that defines the images if you want to pull it from a specific registry, otherwise it might try to pull it from dockerhub.
+This is very alpha and will be configurable in the future
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -40,6 +55,9 @@ privileges or be logged in as admin.
 
 **Create instances of your solution**
 You can apply the samples (examples) from the config/sample:
+
+Currently this will create two sources, with each having one definition and each one workspace.
+The final result should be each workspace having a deployment with one pod that you can exec into / attach VSCode to.
 
 ```sh
 kubectl apply -k config/samples/
@@ -97,6 +115,8 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/devcontainer/<tag or br
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
+
+**TODO: Update this section**
 
 Copyright 2025.
 
