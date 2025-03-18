@@ -1,11 +1,11 @@
 apiVersion: devcontainer.everproc.com/v1alpha1
-kind: Workspace
+kind: Definition
 metadata:
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: workspace-sample
+  name: jupyter-sample
 spec:
   # TODO(user): Add fields here
-  definitionRef: my-definition-sample
-  owner: julius
+  source: jupyter-python-template-starter
+  gitHashOrTag: master

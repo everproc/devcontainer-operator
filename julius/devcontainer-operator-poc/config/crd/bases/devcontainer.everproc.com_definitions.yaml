@@ -56,12 +56,7 @@ spec:
                     type: object
                   dockerfile:
                     type: string
-                required:
-                - args
-                - dockerfile
                 type: object
-              definition:
-                type: string
               image:
                 type: string
               podTemplateSpec:
@@ -7961,14 +7956,14 @@ spec:
                     - containers
                     type: object
                 type: object
+              rawDefinition:
+                type: string
               run:
                 properties:
                   args:
                     items:
                       type: string
                     type: array
-                required:
-                - args
                 type: object
             type: object
           spec:

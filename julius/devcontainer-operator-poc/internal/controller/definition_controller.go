@@ -19,8 +19,12 @@ package controller
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
@@ -77,7 +82,45 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	} // Let's just set the status as Unknown when no status is available
 	if instance.Status.Conditions == nil || len(instance.Status.Conditions) == 0 {
-		r.updateStatusMany(ctx, req.NamespacedName, instance, devcontainerv1alpha1.InitialConditionsDefinition())
+		if err := r.updateStatusMany(ctx, req.NamespacedName, instance, devcontainerv1alpha1.InitialConditionsDefinition()); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	{
+
+		on := os.Getenv("ENABLE_FINALIZER")
+		// Finalizer Section
+		finalizerName, executor := DefinitionFinalizerForRelatedWorkspaces()
+		// See documentation of the field, it's enlightning
+		if instance.ObjectMeta.DeletionTimestamp.IsZero() {
+			// TODO(juf): AddFinalizer is probably idempotent and tells us if it's a no-op,
+			// so we probably could and should remove the Contains check. Only if it makes sense though.
+			if on == "yes" {
+				if !controllerutil.ContainsFinalizer(instance, finalizerName) {
+					if controllerutil.AddFinalizer(instance, finalizerName) {
+						if err := r.Update(ctx, instance); err != nil {
+							return ctrl.Result{}, err
+						}
+					}
+				}
+			}
+		} else {
+			// Return with positive result if this detects object is being deleted
+			if controllerutil.ContainsFinalizer(instance, finalizerName) {
+				definitionID := GetDefinitionIDLabel(instance)
+				if definitionID == "" {
+					log.Info("Empty definitionID found, not executing any finalizers")
+					return ctrl.Result{}, nil
+				}
+				if err := executor(ctx, r, definitionID); err != nil {
+					return ctrl.Result{}, err
+				}
+				// Reconcile is done, the resource will not exist any longer after we return a positive result
+				return ctrl.Result{}, nil
+			} else {
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	src := &devcontainerv1alpha1.Source{}
@@ -104,98 +147,15 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.Info("Definiton ID did not change")
 		}
 	}
-	AttachDefinitionIDLabel(instance, definitionID)
-	r.Update(ctx, instance)
 
 	pvcRes, err := r.ensurePvc(ctx, instance, definitionID)
 	if err != nil {
 		return pvcRes, err
 	} else {
 		if !pvcRes.IsZero() {
+			log.Info("Ensure PVC returned non-zero object")
 			return pvcRes, nil
 		}
-	}
-
-	//pvc := &corev1.PersistentVolumeClaim{}
-	//err = r.Get(ctx, types.NamespacedName{Name: r.pvcName(instance), Namespace: instance.Namespace}, pvc)
-	//if err != nil {
-	//	if apierrors.IsNotFound(err) {
-	//		log.Info("Not found, let's schedule a PVC for creation")
-	//		if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
-	//			return ctrl.Result{}, err
-	//		}
-	//		pvc, err := r.pvcForGitRepo(instance)
-	//		if err != nil {
-	//			log.Error(err, "Failed to construct PVC spec")
-	//			return ctrl.Result{}, err
-	//		}
-	//		AttachDefinitionIDLabel(pvc, definitionID)
-	//		err = r.Create(ctx, pvc)
-	//		if err != nil {
-	//			log.Error(err, "Failed to create PVC")
-	//			return ctrl.Result{}, err
-	//		}
-	//		// TODO (juf): make configurable
-	//		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
-	//	} else {
-	//		log.Error(err, "Failed to get pvc info")
-	//		return ctrl.Result{}, err
-	//	}
-	//}
-
-	// TODO (juf): The PVC will not be bound until we have a pod assigned to it and no PV will be there based on the storageclass,
-	// e.g., on kind (local) the behaviour is something like WaitForConsumer. Therefore this code needs to also handle this
-	// Ignore PVC/PV statuses for now
-	//if pvc.Status.Phase != corev1.ClaimBound {
-	//	pv := &corev1.PersistentVolume{}
-	//	err = r.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName, Namespace: instance.Namespace}, pv)
-	//	if apierrors.IsNotFound(err) {
-	//		log.Info("PV Not found")
-	//		if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: typeAvailable, Status: metav1.ConditionUnknown, Reason: "ProvisioningPV", Message: "Provisioning PV"}); err != nil {
-	//			return ctrl.Result{}, err
-	//		}
-	//		// TODO (juf): make configurable
-	//		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	//	} else {
-	//		log.Error(err, "Failed to get PV info")
-	//		return ctrl.Result{}, err
-	//	}
-	//}
-
-	// PVC is ready? I guess so
-	clonePod := &corev1.Pod{}
-	err = r.Get(ctx, types.NamespacedName{Name: r.clonePodName(instance), Namespace: instance.Namespace}, clonePod)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Not found, let's schedule the clone pod for creation")
-			if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPodGit", Message: "Provisioning Clone Pod"}); err != nil {
-				return ctrl.Result{}, err
-			}
-			pod, err := r.gitClonePod(instance, src)
-			if err != nil {
-				log.Error(err, "Failed to construct clone pod spec")
-				return ctrl.Result{}, err
-			}
-			AttachDefinitionIDLabel(pod, definitionID)
-			err = r.Create(ctx, pod)
-			if err != nil {
-				log.Error(err, "Failed to create clone pod")
-				return ctrl.Result{}, err
-			}
-			// TODO (juf): make configurable
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		} else {
-			log.Error(err, "Failed to get pod info")
-			return ctrl.Result{}, err
-		}
-	}
-
-	if !podIsReadyOrFinished(clonePod) {
-		log.Info("Clone pod is not ready")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionTrue, Reason: "RemoteClonedSuccessfully", Message: "Git remote has been cloned to PVC"}); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// TODO (juf): This should probably not live here.
@@ -213,65 +173,188 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
 
-	parsePod := &corev1.Pod{}
-	err = r.Get(ctx, types.NamespacedName{Name: r.parsePodName(instance), Namespace: instance.Namespace}, parsePod)
+	podRes, err := r.ensureSetupPod(ctx, instance, src, definitionID)
+	if err != nil {
+		return podRes, err
+	} else {
+		if !podRes.IsZero() {
+			log.Info("Ensure Pod returned non-zero object")
+			return podRes, nil
+		}
+	}
+
+	cmList := &corev1.ConfigMapList{}
+	err = r.List(ctx, cmList, client.MatchingLabels{
+		LabelDefinitionMapKey: definitionID,
+	}, client.InNamespace(instance.Namespace))
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(cmList.Items) == 0 {
+		log.Info("No ConfigMap for match definitionID found", "definitionID", definitionID)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	} else if len(cmList.Items) > 0 {
+		for _, d := range cmList.Items {
+			id := GetDefinitionIDLabel(&d)
+			if id == "" || id != definitionID {
+				err = r.Delete(ctx, &d)
+				if err != nil {
+					log.Error(err, "Failed to delete old ConfigMap", "configMap", d.Name)
+					return ctrl.Result{}, err
+				}
+			} else {
+				if err := ctrl.SetControllerReference(instance, &d, r.Scheme); err != nil {
+					log.Error(err, "Failed to set owner reference on config map")
+					return ctrl.Result{}, err
+				} else {
+					log.Info("Updated OwnerReferences on ConfigMap", "configMap", d.Name)
+				}
+				if err := r.Update(ctx, &d); err != nil {
+					log.Error(err, "Failed to update config map")
+					return ctrl.Result{}, err
+				}
+				data, ok := d.BinaryData["definition"]
+				if !ok {
+					err := errors.New("ConfigMap should have definition key but it's missing")
+					log.Error(err, "Missing defintion key entry from ConfigMap")
+					return ctrl.Result{}, err
+				}
+				if len(data) == 0 {
+					err := errors.New("ConfigMap should have non-empty data under key definition")
+					log.Error(err, "Empty definition in ConfigMap")
+					return ctrl.Result{}, err
+				}
+				parsedDevcontainer := &devcontainerv1alpha1.ParsedDefinition{}
+				if err := json.Unmarshal(data, &parsedDevcontainer); err != nil {
+					log.Error(err, "Could not parse definition from ConfigMap. Either the config map is too old or corrupted")
+					return ctrl.Result{}, err
+				}
+				// TODO(juf): This might not be 100% correct, I am not sure if the equality is applicable here, I did not check every field
+				// TODO make it comparable
+				// I hate Go sometimes
+				if !devcontainerv1alpha1.EqualParsedDefinitions(&instance.Parsed, parsedDevcontainer) {
+					wanted := *instance
+					wanted.Parsed = *parsedDevcontainer
+					data, err := client.MergeFrom(instance).Data(&wanted)
+					if err != nil {
+						log.Error(err, "Could not create MergePatch for defintion")
+						return ctrl.Result{}, err
+					}
+					patch := client.RawPatch(types.MergePatchType, data)
+					if err := r.Patch(ctx, instance, patch); err != nil {
+						//if err := r.Update(ctx, instance); err != nil {
+						time.Sleep(3 * time.Second)
+						log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
+						return ctrl.Result{}, err
+					}
+					log.Info("Successfully updated Definition with Devcontainer JSON info")
+				} else {
+					log.Info("No change in Devcontainer JSON info")
+				}
+			}
+		}
+	}
+
+	if err := r.updateStatusMany(ctx, req.NamespacedName, instance, []metav1.Condition{
+		{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionTrue, Reason: "ParsePodSucceeded", Message: "Parsing JSON succeeded"},
+		{Type: devcontainerv1alpha1.DefinitionCondTypeReady, Status: metav1.ConditionTrue, Reason: "ReconcileFinished", Message: fmt.Sprintf("Reconcile finished for id %q", definitionID)}}); err != nil {
+		return ctrl.Result{}, err
+	}
+	patch := patchDefinitionIDLabel(definitionID)
+	if err := r.Patch(ctx, instance, patchDefinitionIDLabel(definitionID)); err != nil {
+		data, otherErr := patch.Data(instance)
+		if otherErr != nil {
+			log.Error(err, "Patch is broken")
+			time.Sleep(10 * time.Second)
+		}
+		log.Info(fmt.Sprintf("Patch: %+v", string(data)))
+		time.Sleep(3 * time.Second)
+		log.Error(err, "Failed to patch instance with definition ID label")
+		return ctrl.Result{}, err
+	}
+	log.Info("Resource was successfully reconciled")
+	return ctrl.Result{}, nil
+}
+
+func patchDefinitionIDLabel(newDefinitionID string) client.Patch {
+	escapedLabelKey := strings.ReplaceAll(LabelDefinitionMapKey, "/", "~1")
+	op := []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/labels/%s", "value": %q}]`, escapedLabelKey, newDefinitionID))
+	return client.RawPatch(types.JSONPatchType, op)
+}
+
+func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	createFn := func() (ctrl.Result, error) {
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionUnknown, Reason: "ProvisioningPodParse", Message: "Provisioning Parse Pod"}); err != nil {
+			log.Info("Failed to update status during pod setup")
+			return ctrl.Result{}, err
+		}
+		pod, err := r.setupPod(instance, src, definitionID, WorkspacePVCName(instance))
+		if err != nil {
+			log.Error(err, "Failed to construct parse pod spec")
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
+		}
+		AttachDefinitionIDLabel(pod, definitionID)
+		err = r.Create(ctx, pod)
+		if err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				log.Info("Pod already exists, rescheduling...")
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			} else {
+				log.Error(err, "Failed to create parse pod")
+				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionFalse, Reason: "ProvisioningPodParseErr", Message: err.Error()}); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+			}
+		}
+		// TODO (juf): make configurable
+		log.Info("Waiting for pod to be scheduled...")
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	setupPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: r.setupPodName(instance), Namespace: instance.Namespace}, setupPod)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Not found, let's schedule the parse pod for creation")
-			if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionUnknown, Reason: "ProvisioningPodParse", Message: "Provisioning Parse Pod"}); err != nil {
-				return ctrl.Result{}, err
-			}
-			pod, err := r.parsePod(instance)
-			if err != nil {
-				log.Error(err, "Failed to construct parse pod spec")
-				return ctrl.Result{RequeueAfter: 15 * time.Second}, err
-			}
-			AttachDefinitionIDLabel(pod, definitionID)
-			err = r.Create(ctx, pod)
-			if err != nil {
-				log.Error(err, "Failed to create parse pod")
-				if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionFalse, Reason: "ProvisioningPodParseErr", Message: err.Error()}); err != nil {
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{RequeueAfter: 15 * time.Second}, err
-			}
-			// TODO (juf): make configurable
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			return createFn()
 		} else {
 			log.Error(err, "Failed to get pod info")
 			return ctrl.Result{}, err
 		}
 	}
-
-	if !podIsReadyOrFinished(parsePod) {
+	podDefinitionID := GetDefinitionIDLabel(setupPod)
+	if podDefinitionID != definitionID {
+		log.Info("The current Pod does not match the given definitionID, deleting...")
+		if err := r.Delete(ctx, setupPod); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Do nothing, the pod is somehow already gone
+			} else {
+				return ctrl.Result{}, err
+			}
+		}
+		return createFn()
+	}
+	if !PodIsReadyOrFinished(setupPod) {
 		log.Info("Parse pod is not ready")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-
-	if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionTrue, Reason: "ParsePodSucceeded", Message: "Parsing JSON succeeded"}); err != nil {
-		return ctrl.Result{}, err
-	}
+	// Nothing to do continue
 	return ctrl.Result{}, nil
 }
 
 func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	ownedPVCs := &corev1.PersistentVolumeClaimList{}
 	// Let's hope this works.
 	// Why are we doing this?
 	// We want to remove any outdated deployments when the definitionID changes
-	err := r.List(ctx, ownedPVCs, client.MatchingFields{
-		"metadata.ownerReferences.kind": instance.Kind,
-		"metadata.ownerReferences.name": instance.Name,
-	})
+	pvc := &corev1.PersistentVolumeClaim{}
+	id := types.NamespacedName{Name: WorkspacePVCName(instance), Namespace: instance.Namespace}
+	err := r.Get(ctx, id, pvc)
 	// If size equals 0, we have to create the PVC
 	// if size equals 1, we need to check if the definitionID label matches, if it does, everything is fine, else schedule the PVC and delete the old PVC
 	// if size is greater than 1 we need to clean up
-	if len(ownedPVCs.Items) == 0 {
-		log.Info("Not found, let's schedule a PVC for creation")
-		if err := r.updateStatus(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
-			return ctrl.Result{}, err
-		}
+	createFn := func() (ctrl.Result, error) {
 		pvc, err := r.pvcForGitRepo(instance)
 		if err != nil {
 			log.Error(err, "Failed to construct PVC spec")
@@ -280,24 +363,42 @@ func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devconta
 		AttachDefinitionIDLabel(pvc, definitionID)
 		err = r.Create(ctx, pvc)
 		if err != nil {
-			log.Error(err, "Failed to create PVC")
-			return ctrl.Result{}, err
-		}
-		// TODO (juf): make configurable
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
-	} else if len(ownedPVCs.Items) > 1 {
-		for _, d := range ownedPVCs.Items {
-			id := GetDefinitionIDLabel(&d)
-			if id == "" || id != definitionID {
-				err = r.Delete(ctx, &d)
-				if err != nil {
-					log.Error(err, "Failed to delete old deployment", "deploymentName", d.Name)
-					return ctrl.Result{}, err
-				}
+			if apierrors.IsAlreadyExists(err) {
+				log.Error(err, "PVC already exists")
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			} else {
+				log.Error(err, "Failed to create PVC")
+				return ctrl.Result{}, err
 			}
 		}
+		if err := r.updateStatus(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionUnknown, Reason: "ProvisioningPVC", Message: "Provisioning PVC"}); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-	return ctrl.Result{}, err
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Not found, let's schedule a PVC for creation")
+			return createFn()
+		} else {
+			log.Error(err, "Error while fetching PVCs")
+			return ctrl.Result{}, err
+		}
+	}
+	pvcDefinitionID := GetDefinitionIDLabel(pvc)
+	if pvcDefinitionID != definitionID {
+		log.Info("The current PVC does not match the given definitionID, deleting...")
+		if err := r.Delete(ctx, pvc); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Do nothing, the pvc is somehow already gone
+			} else {
+				return ctrl.Result{}, err
+			}
+		}
+		return createFn()
+	}
+	// Nothing to do continue
+	return ctrl.Result{}, nil
 }
 
 func definitionID(instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) string {
@@ -308,22 +409,6 @@ func definitionID(instance *devcontainerv1alpha1.Definition, src *devcontainerv1
 	}
 	out := h.Sum(nil)
 	return fmt.Sprintf("%x", out)
-}
-
-func podIsReadyOrFinished(pod *corev1.Pod) bool {
-	if pod.Status.Phase == corev1.PodSucceeded {
-		return true
-	}
-	for _, cond := range pod.Status.Conditions {
-		if cond.Type != corev1.PodReady {
-			continue
-		}
-		if cond.Status != corev1.ConditionTrue {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func (r *DefinitionReconciler) updateStatusMany(ctx context.Context, namespacedName types.NamespacedName, instance *devcontainerv1alpha1.Definition, conditions []metav1.Condition) error {
@@ -364,16 +449,20 @@ func (r *DefinitionReconciler) updateStatus(ctx context.Context, namespacedName 
 	return nil
 }
 
-func (r *DefinitionReconciler) pvcName(inst *devcontainerv1alpha1.Definition) string {
-	return fmt.Sprintf("%s-git", inst.Name)
+func WorkspacePVCNameFromDefinitionName(name string) string {
+	return fmt.Sprintf("%s-git", name)
+}
+
+func WorkspacePVCName(inst *devcontainerv1alpha1.Definition) string {
+	return WorkspacePVCNameFromDefinitionName(inst.Name)
+}
+
+func (r *DefinitionReconciler) setupPodName(inst *devcontainerv1alpha1.Definition) string {
+	return fmt.Sprintf("%s-setup", inst.Name)
 }
 
 func (r *DefinitionReconciler) clonePodName(inst *devcontainerv1alpha1.Definition) string {
 	return fmt.Sprintf("%s-git-clone", inst.Name)
-}
-
-func (r *DefinitionReconciler) parsePodName(inst *devcontainerv1alpha1.Definition) string {
-	return fmt.Sprintf("%s-parse", inst.Name)
 }
 
 func (r *DefinitionReconciler) ensureServiceAccount(ctx context.Context, namespace string) error {
@@ -392,6 +481,7 @@ func (r *DefinitionReconciler) ensureServiceAccount(ctx context.Context, namespa
 }
 
 func (r *DefinitionReconciler) ensureUtilRoles(ctx context.Context, namespace string) error {
+	// TODO(juf): refine and split this.
 	role := &rbac.Role{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: rbac.SchemeGroupVersion.String(),
@@ -412,6 +502,13 @@ func (r *DefinitionReconciler) ensureUtilRoles(ctx context.Context, namespace st
 					"sources",
 				},
 				Verbs: []string{"*"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{
+					"configmaps",
+				},
+				Verbs: []string{"create"},
 			},
 		},
 	}
@@ -484,7 +581,7 @@ func GetDefinitionIDLabel(resource client.Object) string {
 func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definition) (*corev1.PersistentVolumeClaim, error) {
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.pvcName(inst),
+			Name:      WorkspacePVCName(inst),
 			Namespace: inst.Namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -494,7 +591,7 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					// TODO(juf): this should somehow be dynamic based on the git repo size
-					corev1.ResourceStorage: resource.MustParse("1Gi"),
+					corev1.ResourceStorage: resource.MustParse("100Mi"),
 				},
 			},
 		},
@@ -505,89 +602,18 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 	return pvc, nil
 }
 
-func (r *DefinitionReconciler) gitClonePod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) (*corev1.Pod, error) {
-	pvcName := r.pvcName(inst)
-	pvc := &corev1.Pod{
+func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*corev1.Pod, error) {
+	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.clonePodName(inst),
-			Namespace: inst.Namespace,
-		},
-		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Containers: []corev1.Container{
-				{
-					// TODO (juf): dont use latest
-					Name: "git-clone",
-					//kind load
-					//Image: "registry.hub.docker.com/library/alpine/git:latest",
-					Image: "alpine/git:latest",
-					Command: []string{
-						// TODO(juf): check if this makes sense. I am pretty sure this does clone into workspace, so /workspace will become the repo
-						// but maybe this is ok for us.
-						"git", "clone", src.Spec.GitURL, "/workspace",
-					},
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      pvcName,
-							MountPath: "/workspace",
-						},
-					},
-				},
-			},
-			Volumes: []corev1.Volume{
-				{
-					Name: pvcName,
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: pvcName,
-						},
-					},
-				},
-			},
-		},
-	}
-	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
-		return nil, err
-	}
-	return pvc, nil
-}
-
-func (r *DefinitionReconciler) parsePod(inst *devcontainerv1alpha1.Definition) (*corev1.Pod, error) {
-	pvcName := r.pvcName(inst)
-	pvc := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.parsePodName(inst),
+			Name:      r.setupPodName(inst),
 			Namespace: inst.Namespace,
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: UtilServiceAccountName,
-			RestartPolicy:      corev1.RestartPolicyNever,
+			RestartPolicy:      corev1.RestartPolicyOnFailure,
 			Containers: []corev1.Container{
-				{
-					Name: "parser",
-					// TODO (juf): dont use latest
-					//Image: "registry.hub.docker.com/library/_/busybox:latest",
-					Image: "parserapp:0.0.1",
-					Args: []string{
-						// TODO(juf): check if this makes sense. I am pretty sure this does clone into workspace, so /workspace will become the repo
-						// but maybe this is ok for us.
-						// Replace by code that creates the next CRD
-						"/workspace/.devcontainer/devcontainer.json",
-					},
-					Env: []corev1.EnvVar{
-						{
-							// Name of the resource it should update
-							Name:  "DEFINITION_ENV_NAME",
-							Value: inst.Name,
-						},
-					},
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      pvcName,
-							MountPath: "/workspace",
-						},
-					},
-				},
+				r.gitCloneContainer(inst, src),
+				r.parseContainer(inst, definitionID),
 			},
 			Volumes: []corev1.Volume{
 				{
@@ -601,14 +627,93 @@ func (r *DefinitionReconciler) parsePod(inst *devcontainerv1alpha1.Definition) (
 			},
 		},
 	}
-	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
+	AttachDefinitionIDLabel(pod, definitionID)
+
+	if err := ctrl.SetControllerReference(inst, pod, r.Scheme); err != nil {
 		return nil, err
 	}
-	return pvc, nil
+
+	return pod, nil
+}
+
+func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) corev1.Container {
+	pvcName := WorkspacePVCName(inst)
+	return corev1.Container{
+		Name: "git-clone",
+		// TODO (juf): dont use latest
+		// TODO (juf): make configurable
+		Image: GIT_IMAGE_NAME,
+		Env: []corev1.EnvVar{
+			{
+				Name:  "REPO_URL",
+				Value: src.Spec.GitURL,
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      pvcName,
+				MountPath: "/workspace",
+			},
+		},
+	}
+}
+
+func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitonID string) corev1.Container {
+	pvcName := WorkspacePVCName(inst)
+	return corev1.Container{
+		Name: "parser",
+		// TODO (juf): make configurable
+		Image: PARSERAPP_IMAGE_NAME,
+		Args: []string{
+			// TODO(juf): check if this makes sense. I am pretty sure this does clone into workspace, so /workspace will become the repo
+			// but maybe this is ok for us.
+			// Replace by code that creates the next CRD
+			"/workspace/.devcontainer/devcontainer.json",
+		},
+		Env: []corev1.EnvVar{
+			{
+				// Name of the resource it should update
+				Name:  "DEFINITION_ENV_NAME",
+				Value: inst.Name,
+			},
+			{
+				// Name of the resource it should update
+				Name:  "DEFINITION_ENV_ID",
+				Value: definitonID,
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      pvcName,
+				MountPath: "/workspace",
+			},
+		},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *DefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.ConfigMap{}, "metadata.ownerReferences.kind", func(obj client.Object) []string {
+		cm := obj.(*corev1.ConfigMap)
+		var kinds []string
+		for _, owner := range cm.OwnerReferences {
+			kinds = append(kinds, owner.Kind)
+		}
+		return kinds
+	}); err != nil {
+		return err
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.ConfigMap{}, "metadata.ownerReferences.name", func(obj client.Object) []string {
+		cm := obj.(*corev1.ConfigMap)
+		var names []string
+		for _, owner := range cm.OwnerReferences {
+			names = append(names, owner.Name)
+		}
+		return names
+	}); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&devcontainerv1alpha1.Definition{}).
 		Named("definition").

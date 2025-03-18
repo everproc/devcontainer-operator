@@ -158,6 +158,7 @@ func main() {
 	}
 	if err = (&controller.WorkspaceReconciler{
 		Client: mgr.GetClient(),
+		Config: mgr.GetConfig(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")

@@ -29,7 +29,7 @@ type WorkspaceSpec struct {
 	Owner string `json:"owner"`
 
 	// +kubebuilder:validation:Required
-	DefinitionRef string `json:"definition_ref"`
+	DefinitionRef string `json:"definitionRef"`
 }
 
 const (
@@ -61,7 +61,7 @@ type WorkspaceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status['Ready'].status"
 // +kubebuilder:printcolumn:JSONPath=".spec.owner",name=Owner,type=string
-// +kubebuilder:printcolumn:JSONPath=".spec.definition_ref",name=DefinitionRef,type=string
+// +kubebuilder:printcolumn:JSONPath=".spec.definitionRef",name=DefinitionRef,type=string
 
 // Workspace is the Schema for the workspaces API.
 type Workspace struct {

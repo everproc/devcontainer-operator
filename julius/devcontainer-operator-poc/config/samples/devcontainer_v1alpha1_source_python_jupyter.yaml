@@ -1,11 +1,9 @@
 apiVersion: devcontainer.everproc.com/v1alpha1
-kind: Workspace
+kind: Source
 metadata:
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: workspace-sample
+  name: jupyter-python-template-starter
 spec:
-  # TODO(user): Add fields here
-  definitionRef: my-definition-sample
-  owner: julius
+  gitUrl: 'https://github.com/daemonfire300/sample-jupyter-devcontainer.git'

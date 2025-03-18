@@ -17,16 +17,25 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"reflect"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func EqualParsedDefinitions(a, b *ParsedDefinition) bool {
+	return reflect.DeepEqual(a, b)
+}
+
 type BuildSpec struct {
-	Dockerfile string            `json:"dockerfile"`
-	Args       map[string]string `json:"args"`
+	// +kubebuilder:validation:Optional
+	Dockerfile string `json:"dockerfile"`
+	// +kubebuilder:validation:Optional
+	Args map[string]string `json:"args"`
 }
 
 type RunSpec struct {
+	// +kubebuilder:validation:Optional
 	Args []string `json:"args"`
 }
 
@@ -42,7 +51,7 @@ type ParsedDefinition struct {
 	PodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
 
 	// +kubebuilder:validation:Optional
-	RawDefinition string `json:"definition"`
+	RawDefinition string `json:"rawDefinition"`
 	// +kubebuilder:validation:Optional
 	Image string `json:"image"`
 	// +kubebuilder:validation:Optional

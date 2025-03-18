@@ -21,7 +21,7 @@ spec:
     - jsonPath: .spec.owner
       name: Owner
       type: string
-    - jsonPath: .spec.definition_ref
+    - jsonPath: .spec.definitionRef
       name: DefinitionRef
       type: string
     name: v1alpha1
@@ -49,12 +49,12 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
-              definition_ref:
+              definitionRef:
                 type: string
               owner:
                 type: string
             required:
-            - definition_ref
+            - definitionRef
             - owner
             type: object
           status:
