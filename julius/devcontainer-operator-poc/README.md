@@ -61,7 +61,9 @@ flowchart
 		
 	end
 	subgraph WorkspaceCreation
-		Workspace -->|Final Step|Deployment
+		Workspace -->|Read PodSpecTpl|Definition
+		Workspace -->|Modify and Apply PodSpecTpl|Deployment
+		Workspace -->|Run PostCreationCommands|Deployment
 	end
 	
     
