@@ -12,6 +12,30 @@ Using `features` from the spec is not supported.
 Using a Dockerfile is currently also not supported, you have to pre-build your images.
 The repository that owns the .devcontainer will _always_ be mounted at `/workspace`.
 
+```mermaid
+---
+title: CRD Structure (first idea)
+---
+erDiagram
+    Source ||--o| Definition : has
+    Workspace ||--|| Definition : has
+    Workspace ||--|| Deployment : produces
+
+	Source {
+		GitURL string
+	}
+	Definition {
+		RevisionGitHashOrTag string
+		RawSpec json
+		PodTemplateSpec *
+	}
+	Workspace {
+		DefinitionRef string
+		Owner string
+	}
+
+```
+
 ## Getting Started
 
 **NOTE:** Parts of the README are still from the kubebuilder boilerplate keep this in mind.
