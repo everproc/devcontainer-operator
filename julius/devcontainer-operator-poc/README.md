@@ -36,6 +36,36 @@ erDiagram
 
 ```
 
+
+```mermaid
+---
+title: Flow
+---
+flowchart
+	PVC@{ shape: lin-rect, label: "Create (PVC)" }
+	Clone@{ label : Git Clone Pod (into PVC) (Container/1) }
+	Parse@{ label : Parse Devcontainer JSON (using same PVC) (Container/2) }
+
+	 
+
+	Source -->|from|Clone
+
+	subgraph Setup
+	Definition --> PVC
+	PVC --> SetupPod
+	SetupPod --> Clone
+	Clone --> Parse
+	Parse -->|ParsePod creates config map|ConfigMap
+	Definition -->|Operator reads from config map and updates Definition|ConfigMap
+	end
+	subgraph WorkspaceCreation
+		Workspace -->|Final Step|Deployment
+	end
+	
+    
+
+```
+
 ## Getting Started
 
 **NOTE:** Parts of the README are still from the kubebuilder boilerplate keep this in mind.
