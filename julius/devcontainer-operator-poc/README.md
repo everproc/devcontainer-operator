@@ -51,12 +51,14 @@ flowchart
 	Source -->|from|Clone
 
 	subgraph Setup
-	Definition --> PVC
-	PVC --> SetupPod
-	SetupPod --> Clone
-	Clone --> Parse
-	Parse -->|ParsePod creates config map|ConfigMap
-	Definition -->|Operator reads from config map and updates Definition|ConfigMap
+		Definition -->|Operator reads from config map and updates Definition|ConfigMap
+		Definition --> PVC
+		PVC --> SetupPod
+		subgraph SetupPod
+			Clone --> Parse
+			Parse -->|ParsePod creates config map|ConfigMap
+		end
+		
 	end
 	subgraph WorkspaceCreation
 		Workspace -->|Final Step|Deployment
