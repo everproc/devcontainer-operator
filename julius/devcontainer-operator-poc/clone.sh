@@ -6,7 +6,7 @@ cd /workspace
 ls -lah .
 if [ ! -d ".git" ]
 then
-    git clone $REPO_URL . && echo "CLONED" 
+    git clone $REPO_URL . && git checkout $GIT_HASH_OR_BRANCH echo "CLONED" 
 
     if [ ! -d "/workspace/.tmp/git_status" ]
     then

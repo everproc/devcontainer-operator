@@ -648,6 +648,10 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 				Name:  "REPO_URL",
 				Value: src.Spec.GitURL,
 			},
+			{
+				Name:  "GIT_HASH_OR_BRANCH",
+				Value: inst.Spec.GitHashOrTag,
+			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
