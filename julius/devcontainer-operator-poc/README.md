@@ -81,7 +81,7 @@ flowchart
 - Access to a Kubernetes v1.11.3+ cluster.
 
 If you are running this locally using kind: run `make build-and-push-utilities` before you attempt to create any resources.
-If you are running this locally not using kind: run `build-utilities`, you then need to make sure that the resulting two images are put somewhere where the cluster can pull it from.
+If you are running this locally not using kind: run `make build-utilities`, you then need to make sure that the resulting two images are put somewhere where the cluster can pull it from.
 Currently you might need to even adjust the code that defines the images if you want to pull it from a specific registry, otherwise it might try to pull it from dockerhub.
 This is very alpha and will be configurable in the future
 
