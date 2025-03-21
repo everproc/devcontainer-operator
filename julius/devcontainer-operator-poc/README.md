@@ -132,6 +132,10 @@ The final result should be each workspace having a deployment with one pod that 
 kubectl apply -k config/samples/
 ```
 
+This will add two sources and a definition for each using a different repository.
+In addition to that it spawns two workspaces for the user `julius`.
+The end result will be two deployments with each `replica=1` to which you can attach VSCode (to the pod/container of the deployment).
+
 >**NOTE**: Ensure that the samples has default values to test it out.
 
 ### To Uninstall
@@ -175,29 +179,3 @@ Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/<org>/devcontainer/<tag or branch>/dist/install.yaml
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
-## License
-
-**TODO: Update this section**
-
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
