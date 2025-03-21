@@ -86,6 +86,11 @@ Currently you might need to even adjust the code that defines the images if you 
 This is very alpha and will be configurable in the future
 
 ### To Deploy on the cluster
+
+(Not recommended for testing out / local development)
+
+Use `make run` instead for testing/local development instead (requires CRD Install section first).
+
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
