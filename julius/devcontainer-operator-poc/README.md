@@ -102,6 +102,12 @@ Make sure you have the proper permission to the registry if the above commands d
 make install
 ```
 
+To re-install (deletes CRD and re-applies them).
+
+```sh
+make reinstall
+```
+
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
 ```sh
