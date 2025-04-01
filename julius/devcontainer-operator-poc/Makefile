@@ -159,10 +159,10 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 build-parser:
-	docker build -f Dockerfile.parserapp . -t parserapp:0.0.1
+	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:0.0.1
 
 build-git-clone:
-	docker build -f Dockerfile.gitclone . -t git-clone:0.0.1
+	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:0.0.1
 
 build-utilities: build-parser build-git-clone
 
