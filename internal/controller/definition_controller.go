@@ -139,12 +139,12 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	definitionID := definitionID(instance, src)
 	previousDefinitionID := GetDefinitionIDLabel(instance)
 	if previousDefinitionID == "" {
-		log.Info("Definiton does not have a git hash based ID yet")
+		log.Info("Definition does not have a git hash based ID yet")
 	} else {
 		if previousDefinitionID != definitionID {
 			log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
 		} else {
-			log.Info("Definiton ID did not change")
+			log.Info("Definition ID did not change")
 		}
 	}
 
@@ -216,7 +216,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				data, ok := d.BinaryData["definition"]
 				if !ok {
 					err := errors.New("ConfigMap should have definition key but it's missing")
-					log.Error(err, "Missing defintion key entry from ConfigMap")
+					log.Error(err, "Missing definition key entry from ConfigMap")
 					return ctrl.Result{}, err
 				}
 				if len(data) == 0 {
@@ -237,12 +237,12 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					wanted.Parsed = *parsedDevcontainer
 					data, err := client.MergeFrom(instance).Data(&wanted)
 					if err != nil {
-						log.Error(err, "Could not create MergePatch for defintion")
+						log.Error(err, "Could not create MergePatch for definition")
 						return ctrl.Result{}, err
 					}
 					patch := client.RawPatch(types.MergePatchType, data)
 					if err := r.Patch(ctx, instance, patch); err != nil {
-						//if err := r.Update(ctx, instance); err != nil {
+						// if err := r.Update(ctx, instance); err != nil {
 						time.Sleep(3 * time.Second)
 						log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
 						return ctrl.Result{}, err
@@ -662,7 +662,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 	}
 }
 
-func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitonID string) corev1.Container {
+func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitionID string) corev1.Container {
 	pvcName := WorkspacePVCName(inst)
 	return corev1.Container{
 		Name: "parser",
@@ -683,7 +683,7 @@ func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definit
 			{
 				// Name of the resource it should update
 				Name:  "DEFINITION_ENV_ID",
-				Value: definitonID,
+				Value: definitionID,
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
