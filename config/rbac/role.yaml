@@ -1,0 +1,38 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - definitions
+  - sources
+  - workspaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - definitions/finalizers
+  - sources/finalizers
+  - workspaces/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - definitions/status
+  - sources/status
+  - workspaces/status
+  verbs:
+  - get
+  - patch
+  - update
