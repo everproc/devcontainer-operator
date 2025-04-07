@@ -1,0 +1,6 @@
+FROM alpine/git:latest
+WORKDIR /tmp
+COPY clone.sh clone.sh
+WORKDIR /workspace
+ENV REPO_URL="undefined.git"
+ENTRYPOINT ["sh", "/tmp/clone.sh"]

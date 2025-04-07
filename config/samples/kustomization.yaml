@@ -1,0 +1,9 @@
+## Append samples of your project ##
+resources:
+- devcontainer_v1alpha1_source.yaml
+- devcontainer_v1alpha1_definition.yaml
+- devcontainer_v1alpha1_workspace.yaml
+- devcontainer_v1alpha1_source_python_jupyter.yaml
+- devcontainer_v1alpha1_workspace_jupyter_with_port.yaml
+- devcontainer_v1alpha1_python_jupyter_definition.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
