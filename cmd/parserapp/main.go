@@ -20,6 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/tailscale/hujson"
+
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
 	"everproc.com/devcontainer/internal/parsing"
 )
@@ -82,13 +84,20 @@ func main() {
 		os.Exit(-1)
 		return
 	}
-	data, err := io.ReadAll(reader)
+	rawData, err := io.ReadAll(reader)
 	if err != nil {
 		log.Error(err, "could not open file (io.ReadAll)")
 		os.Exit(-1)
 		return
 	}
 	devContainerSpec := &parsing.DevContainerSpec{}
+	data, err := hujson.Standardize([]byte(rawData))
+	if err != nil {
+		log.Error(err, "could not standardize json")
+		os.Exit(-1)
+		return
+	}
+
 	if err := json.Unmarshal(data, &devContainerSpec); err != nil {
 		log.Error(err, "could not parse json", "file", file, "data", string(data))
 		os.Exit(-1)
@@ -155,7 +164,7 @@ func main() {
 		}
 	}
 	log.Info(fmt.Sprintf("Spec has %d ports", len(ports)))
-	rawData, err := json.Marshal(devContainerSpec)
+	rawData, err = json.Marshal(devContainerSpec)
 	if err != nil {
 		log.Error(err, "Failed to marshal spec")
 		os.Exit(1)

@@ -38,6 +38,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -145,7 +146,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create PVC")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, src.Spec.GitURL, def.Spec.GitHashOrTag, definitionID, pvc.Name)
+		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &src.Spec, def, definitionID, pvc.Name)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -246,7 +247,26 @@ func (r *WorkspaceReconciler) ensurePVC(ctx context.Context, inst *devcontainerv
 	return pvc, nil
 }
 
-func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitHash string, tpl *corev1.PodTemplateSpec) {
+func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec) {
+	if spec.GitSecret != "" {
+		tpl.Spec.Volumes = append(tpl.Spec.Volumes, corev1.Volume{
+			Name: "git-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  spec.GitSecret,
+					DefaultMode: pointer.Int32(0600),
+				},
+			},
+		})
+		tpl.Spec.InitContainers[0].VolumeMounts = append(tpl.Spec.InitContainers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      "git-secret",
+			MountPath: "/root/.ssh",
+			ReadOnly:  true,
+		})
+	}
+}
+
+func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
 	// Assume there is only one
 	volumeMounts := []corev1.VolumeMount{
 		{
@@ -263,6 +283,10 @@ func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitHash string, tpl *co
 			{
 				Name:  "REPO_URL",
 				Value: gitUrl,
+			},
+			{
+				Name:  "REPO_DOMAIN",
+				Value: gitDomain,
 			},
 			{
 				Name:  "GIT_HASH_OR_BRANCH",
@@ -380,7 +404,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 	return nil
 }
 
-func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, gitUrl, gitHash, definitionID, pvcName string) (*appsv1.Deployment, error) {
+func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, spec *devcontainerv1alpha1.SourceSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
 		"app":          "devcontainer",
 		"definitionID": definitionID,
@@ -390,7 +414,14 @@ func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Worksp
 	}
 	// TODO(juf): Debattable
 	tpl.Labels = maps.UnionInPlace(tpl.Labels, selectorLabels)
-	r.injectPVC(pvcName, gitUrl, gitHash, tpl)
+
+	gitDomain, err := ParseGitUrl(spec.GitURL)
+	if err != nil {
+		return nil, err
+	}
+
+	r.injectPVC(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
+	r.injectSecret(spec, tpl)
 	injectContainerOverwrites(tpl)
 	depl := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{

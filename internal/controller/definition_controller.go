@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -603,6 +604,10 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 }
 
 func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*corev1.Pod, error) {
+	cloneContainer, err := r.gitCloneContainer(inst, src)
+	if err != nil {
+		return nil, err
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.setupPodName(inst),
@@ -612,7 +617,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			ServiceAccountName: UtilServiceAccountName,
 			RestartPolicy:      corev1.RestartPolicyOnFailure,
 			Containers: []corev1.Container{
-				r.gitCloneContainer(inst, src),
+				*cloneContainer,
 				r.parseContainer(inst, definitionID),
 			},
 			Volumes: []corev1.Volume{
@@ -627,6 +632,18 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			},
 		},
 	}
+	if src.Spec.GitSecret != "" {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: "git-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  src.Spec.GitSecret,
+					DefaultMode: pointer.Int32(0600),
+				},
+			},
+		})
+	}
+
 	AttachDefinitionIDLabel(pod, definitionID)
 
 	if err := ctrl.SetControllerReference(inst, pod, r.Scheme); err != nil {
@@ -636,17 +653,27 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 	return pod, nil
 }
 
-func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) corev1.Container {
+func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) (*corev1.Container, error) {
+	gitDomain, err := ParseGitUrl(src.Spec.GitURL)
+	if err != nil {
+		return nil, err
+	}
 	pvcName := WorkspacePVCName(inst)
-	return corev1.Container{
+	cloneContainer := corev1.Container{
 		Name: "git-clone",
 		// TODO (juf): dont use latest
 		// TODO (juf): make configurable
-		Image: GIT_IMAGE_NAME,
+		Image:           GIT_IMAGE_NAME,
+		ImagePullPolicy: corev1.PullAlways,
+		//Command:         []string{"/bin/sh", "-c", "sleep infinity"},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "REPO_URL",
 				Value: src.Spec.GitURL,
+			},
+			{
+				Name:  "REPO_DOMAIN",
+				Value: gitDomain,
 			},
 			{
 				Name:  "GIT_HASH_OR_BRANCH",
@@ -660,6 +687,14 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 			},
 		},
 	}
+	if src.Spec.GitSecret != "" {
+		cloneContainer.VolumeMounts = append(cloneContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      "git-secret",
+			MountPath: "/root/.ssh",
+			ReadOnly:  true,
+		})
+	}
+	return &cloneContainer, nil
 }
 
 func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitionID string) corev1.Container {
