@@ -4,7 +4,8 @@ metadata:
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: daemonfire300-template-starter
+  name: private-template-starter
 spec:
-  gitUrl: 'https://github.com/daemonfire300/template-starter.git'
+  gitUrl: "git@github.com:everproc/private-template-starter.git"
+  gitSecret: "github-deploy-key"
   # TODO(user): Add fields here

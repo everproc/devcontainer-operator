@@ -25,6 +25,9 @@ type SourceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string
 	GitURL string `json:"gitUrl"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:printcolumn:JSONPath="spec.gitSecret",name=GitSecret,type=string
+	GitSecret string `json:"gitSecret"`
 }
 
 // +kubebuilder:object:root=true

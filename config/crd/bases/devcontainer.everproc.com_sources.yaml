@@ -39,6 +39,8 @@ spec:
           spec:
             description: SourceSpec defines the desired state of Source.
             properties:
+              gitSecret:
+                type: string
               gitUrl:
                 type: string
             required:

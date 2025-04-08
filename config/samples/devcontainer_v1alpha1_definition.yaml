@@ -7,5 +7,5 @@ metadata:
   name: my-definition-sample
 spec:
   # TODO(user): Add fields here
-  source: daemonfire300-template-starter
-  gitHashOrTag: daemonfire300-patch-1-valid-json
+  source: private-template-starter
+  gitHashOrTag: main

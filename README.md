@@ -23,6 +23,7 @@ erDiagram
 
 	Source {
 		GitURL string
+		GitSecret string
 	}
 	Definition {
 		RevisionGitHashOrTag string
@@ -46,7 +47,7 @@ flowchart
 	Clone@{ label : Git Clone Pod (into PVC) (Container/1) }
 	Parse@{ label : Parse Devcontainer JSON (using same PVC) (Container/2) }
 
-	 
+
 
 	Source -->|from|Clone
 
@@ -58,15 +59,15 @@ flowchart
 			Clone --> Parse
 			Parse -->|ParsePod creates config map|ConfigMap
 		end
-		
+
 	end
 	subgraph WorkspaceCreation
 		Workspace -->|Read PodSpecTpl|Definition
 		Workspace -->|Modify and Apply PodSpecTpl|Deployment
 		Workspace -->|Run PostCreationCommands|Deployment
 	end
-	
-    
+
+
 
 ```
 
