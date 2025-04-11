@@ -8,4 +8,5 @@ metadata:
 spec:
   # TODO(user): Add fields here
   definitionRef: my-definition-sample
-  owner: julius
+  owner: jan
+  storageClassName: openebs-rwx
