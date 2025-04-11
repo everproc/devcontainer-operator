@@ -42,10 +42,17 @@ type RunSpec struct {
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
 	// +kubebuilder:validation:Required
+	// The reference to the devcontainer source.
 	Source string `json:"source"`
 	// +kubebuilder:validation:Required
+	// The git reference to checkout a specific hash or tag.
 	GitHashOrTag string `json:"gitHashOrTag"`
+	// +kubebuilder:validation:Optional
+	// The storage class that is used for PVC creation.
+	StorageClassName string `json:"storageClassName"`
 }
+
+// The parsed devcontainer json.
 type ParsedDefinition struct {
 	// +kubebuilder:validation:Optional
 	PodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`

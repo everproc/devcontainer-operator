@@ -9,3 +9,4 @@ spec:
   # TODO(user): Add fields here
   source: private-template-starter
   gitHashOrTag: main
+  storageClassName: openebs-rwx

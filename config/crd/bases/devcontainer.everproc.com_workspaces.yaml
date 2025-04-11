@@ -50,8 +50,13 @@ spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
               definitionRef:
+                description: The link to the workspace definition
                 type: string
               owner:
+                description: The owner of this workspace
+                type: string
+              storageClassName:
+                description: The storage class that is used for PVC creation.
                 type: string
             required:
             - definitionRef
