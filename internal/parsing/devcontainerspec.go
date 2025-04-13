@@ -65,7 +65,9 @@ type DevContainerSpec struct {
 
 // https://docs.docker.com/engine/storage/bind-mounts/#options-for---mount
 type Mount struct {
+	// Valid options for type include:
 	// `bind` mounts an existing persistentVolumeClaim
+	// `volume` automatically creates the persistentVolumeClaim that does not yet exist and mounts it.
 	Type string `json:"type,omitempty"`
 	// The persistentVolumeClaim name.
 	Source string `json:"source,omitempty"`
