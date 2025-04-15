@@ -28,6 +28,12 @@ type SourceSpec struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.gitSecret",name=GitSecret,type=string
 	GitSecret string `json:"gitSecret"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:printcolumn:JSONPath="spec.dockerRegistry",name=DockerRegistry,type=string
+	DockerRegistry string `json:"dockerRegistry"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:printcolumn:JSONPath="spec.dockerSecret",name=DockerSecret,type=string
+	DockerSecret string `json:"dockerSecret"`
 }
 
 // +kubebuilder:object:root=true

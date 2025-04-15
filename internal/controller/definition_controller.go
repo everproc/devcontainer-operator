@@ -87,8 +87,8 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, err
 		}
 	}
-	{
 
+	{
 		on := os.Getenv("ENABLE_FINALIZER")
 		// Finalizer Section
 		finalizerName, executor := DefinitionFinalizerForRelatedWorkspaces()
@@ -140,7 +140,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	definitionID := definitionID(instance, src)
 	previousDefinitionID := GetDefinitionIDLabel(instance)
 	if previousDefinitionID == "" {
-		log.Info("Definition does not have a git hash based ID yet")
+		log.Info("Definition does not have a git hash based ID yet", "definitionID", definitionID)
 	} else {
 		if previousDefinitionID != definitionID {
 			log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
@@ -230,6 +230,20 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					log.Error(err, "Could not parse definition from ConfigMap. Either the config map is too old or corrupted")
 					return ctrl.Result{}, err
 				}
+
+				// check if Dockerfile reference exists
+				if parsedDevcontainer.Build.Dockerfile != "" && parsedDevcontainer.Image == "" {
+					podRes, err := r.ensureKanikoPod(ctx, instance, src, definitionID, parsedDevcontainer.Build.Dockerfile, parsedDevcontainer.GitHash)
+					if err != nil {
+						return podRes, err
+					} else {
+						if !podRes.IsZero() {
+							log.Info("Ensure Kaniko Pod returned non-zero object")
+							return podRes, nil
+						}
+					}
+				}
+
 				// TODO(juf): This might not be 100% correct, I am not sure if the equality is applicable here, I did not check every field
 				// TODO make it comparable
 				// I hate Go sometimes
@@ -344,6 +358,67 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 	return ctrl.Result{}, nil
 }
 
+func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, dockerfile string, gitHash string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	createFn := func() (ctrl.Result, error) {
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
+			log.Info("Failed to update status during Kaniko pod setup")
+			return ctrl.Result{}, err
+		}
+		pod, err := r.kanikoPod(instance, src, definitionID, WorkspacePVCName(instance), dockerfile, gitHash)
+		if err != nil {
+			log.Error(err, "Failed to construct parse Kaniko pod spec")
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
+		}
+		AttachDefinitionIDLabel(pod, definitionID)
+		err = r.Create(ctx, pod)
+		if err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				log.Info("Kaniko pod already exists, rescheduling...")
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			} else {
+				log.Error(err, "Failed to create parse Kaniko pod")
+				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "ProvisioningDockerBuildErr", Message: err.Error()}); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+			}
+		}
+		// TODO (juf): make configurable
+		log.Info("Waiting for Kaniko pod to be scheduled...")
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	kanikoPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: r.kanikoPodName(instance), Namespace: instance.Namespace}, kanikoPod)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Not found, let's schedule the parse Kaniko pod for creation")
+			return createFn()
+		} else {
+			log.Error(err, "Failed to get Kaniko pod info")
+			return ctrl.Result{}, err
+		}
+	}
+	podDefinitionID := GetDefinitionIDLabel(kanikoPod)
+	if podDefinitionID != definitionID {
+		log.Info("The current Kaniko Pod does not match the given definitionID, deleting...")
+		if err := r.Delete(ctx, kanikoPod); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Do nothing, the pod is somehow already gone
+			} else {
+				return ctrl.Result{}, err
+			}
+		}
+		return createFn()
+	}
+	if !PodIsReadyOrFinished(kanikoPod) {
+		log.Info("Kaniko pod is not ready")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	// Nothing to do continue
+	return ctrl.Result{}, nil
+}
+
 func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	// Let's hope this works.
@@ -388,7 +463,7 @@ func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devconta
 	}
 	pvcDefinitionID := GetDefinitionIDLabel(pvc)
 	if pvcDefinitionID != definitionID {
-		log.Info("The current PVC does not match the given definitionID, deleting...")
+		log.Info(fmt.Sprintf("The current PVC does not match the given definitionID, deleting...pvcID: %s, definitonID: %s", pvcDefinitionID, definitionID))
 		if err := r.Delete(ctx, pvc); err != nil {
 			if apierrors.IsNotFound(err) {
 				// Do nothing, the pvc is somehow already gone
@@ -460,6 +535,10 @@ func WorkspacePVCName(inst *devcontainerv1alpha1.Definition) string {
 
 func (r *DefinitionReconciler) setupPodName(inst *devcontainerv1alpha1.Definition) string {
 	return fmt.Sprintf("%s-setup", inst.Name)
+}
+
+func (r *DefinitionReconciler) kanikoPodName(inst *devcontainerv1alpha1.Definition) string {
+	return fmt.Sprintf("%s-docker-build", inst.Name)
 }
 
 func (r *DefinitionReconciler) clonePodName(inst *devcontainerv1alpha1.Definition) string {
@@ -642,6 +721,71 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 				},
 			},
 		})
+	}
+
+	AttachDefinitionIDLabel(pod, definitionID)
+
+	if err := ctrl.SetControllerReference(inst, pod, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return pod, nil
+}
+
+func (r *DefinitionReconciler) kanikoPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string, dockerfile string, gitHash string) (*corev1.Pod, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      r.kanikoPodName(inst),
+			Namespace: inst.Namespace,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "kaniko",
+					Image: "gcr.io/kaniko-project/executor:latest",
+					Args: []string{
+						fmt.Sprintf("--dockerfile=%s", dockerfile),
+						"--context=dir://workspace",
+						fmt.Sprintf("--destination=%s/%s:%s", src.Spec.DockerRegistry, src.Name, gitHash),
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "docker-secret",
+							MountPath: "/kaniko/.docker",
+						},
+						{
+							Name:      pvcName,
+							MountPath: "/workspace",
+						},
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Volumes: []corev1.Volume{
+				{
+					Name: "docker-secret",
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: src.Spec.DockerSecret,
+							Items: []corev1.KeyToPath{
+								{
+									Key:  ".dockerconfigjson",
+									Path: "config.json",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: pvcName,
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvcName,
+						},
+					},
+				},
+			},
+		},
 	}
 
 	AttachDefinitionIDLabel(pod, definitionID)

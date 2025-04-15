@@ -57,6 +57,8 @@ spec:
                   dockerfile:
                     type: string
                 type: object
+              gitHash:
+                type: string
               image:
                 type: string
               podTemplateSpec:

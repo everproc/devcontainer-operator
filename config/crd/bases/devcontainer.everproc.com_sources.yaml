@@ -39,6 +39,10 @@ spec:
           spec:
             description: SourceSpec defines the desired state of Source.
             properties:
+              dockerRegistry:
+                type: string
+              dockerSecret:
+                type: string
               gitSecret:
                 type: string
               gitUrl:

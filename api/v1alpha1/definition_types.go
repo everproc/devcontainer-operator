@@ -49,7 +49,6 @@ type DefinitionSpec struct {
 type ParsedDefinition struct {
 	// +kubebuilder:validation:Optional
 	PodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
-
 	// +kubebuilder:validation:Optional
 	RawDefinition string `json:"rawDefinition"`
 	// +kubebuilder:validation:Optional
@@ -58,11 +57,14 @@ type ParsedDefinition struct {
 	Build BuildSpec `json:"build"`
 	// +kubebuilder:validation:Optional
 	Run RunSpec `json:"run"`
+	// +kubebuilder:validation:Optional
+	GitHash string `json:"gitHash"`
 }
 
 const (
 	DefinitionCondTypeReady        = "Ready"
 	DefinitionCondTypeParsed       = "Parsed"
+	DefinitionCondTypeBuilt        = "Built"
 	DefinitionCondTypeRemoteCloned = "RemoteCloned"
 )
 
