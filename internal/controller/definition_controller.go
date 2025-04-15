@@ -231,19 +231,6 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					return ctrl.Result{}, err
 				}
 
-				// check if Dockerfile reference exists
-				if parsedDevcontainer.Build.Dockerfile != "" && parsedDevcontainer.Image == "" {
-					podRes, err := r.ensureKanikoPod(ctx, instance, src, definitionID, parsedDevcontainer.Build.Dockerfile, parsedDevcontainer.GitHash)
-					if err != nil {
-						return podRes, err
-					} else {
-						if !podRes.IsZero() {
-							log.Info("Ensure Kaniko Pod returned non-zero object")
-							return podRes, nil
-						}
-					}
-				}
-
 				// TODO(juf): This might not be 100% correct, I am not sure if the equality is applicable here, I did not check every field
 				// TODO make it comparable
 				// I hate Go sometimes
@@ -266,6 +253,19 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				} else {
 					log.Info("No change in Devcontainer JSON info")
 				}
+			}
+		}
+	}
+
+	// check if Dockerfile reference exists
+	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
+		podRes, err := r.ensureKanikoPod(ctx, instance, src, definitionID)
+		if err != nil {
+			return podRes, err
+		} else {
+			if !podRes.IsZero() {
+				log.Info("Ensure Kaniko Pod returned non-zero object")
+				return podRes, nil
 			}
 		}
 	}
@@ -358,14 +358,14 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 	return ctrl.Result{}, nil
 }
 
-func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, dockerfile string, gitHash string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
-		pod, err := r.kanikoPod(instance, src, definitionID, WorkspacePVCName(instance), dockerfile, gitHash)
+		pod, err := r.kanikoPod(instance, src, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse Kaniko pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
@@ -732,7 +732,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 	return pod, nil
 }
 
-func (r *DefinitionReconciler) kanikoPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string, dockerfile string, gitHash string) (*corev1.Pod, error) {
+func (r *DefinitionReconciler) kanikoPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*corev1.Pod, error) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.kanikoPodName(inst),
@@ -744,9 +744,9 @@ func (r *DefinitionReconciler) kanikoPod(inst *devcontainerv1alpha1.Definition, 
 					Name:  "kaniko",
 					Image: "gcr.io/kaniko-project/executor:latest",
 					Args: []string{
-						fmt.Sprintf("--dockerfile=%s", dockerfile),
+						fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
 						"--context=dir://workspace",
-						fmt.Sprintf("--destination=%s/%s:%s", src.Spec.DockerRegistry, src.Name, gitHash),
+						fmt.Sprintf("--destination=%s/%s:%s", src.Spec.DockerRegistry, src.Name, inst.Parsed.Image),
 					},
 					VolumeMounts: []corev1.VolumeMount{
 						{
