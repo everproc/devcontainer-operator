@@ -26,10 +26,16 @@ type WorkspaceSpec struct {
 	// DefinitionSpecTemplate DefinitionSpecTemplate `json:"definition_spec_template"`
 
 	// +kubebuilder:validation:Required
+	// The owner of this workspace
 	Owner string `json:"owner"`
 
 	// +kubebuilder:validation:Required
+	// The link to the workspace definition
 	DefinitionRef string `json:"definitionRef"`
+
+	// +kubebuilder:validation:Optional
+	// The storage class that is used for PVC creation.
+	StorageClassName string `json:"storageClassName"`
 }
 
 const (
