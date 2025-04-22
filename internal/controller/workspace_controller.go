@@ -38,7 +38,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -238,7 +238,7 @@ func (r *WorkspaceReconciler) ensurePVC(ctx context.Context, inst *devcontainerv
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = pointer.String(inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -257,7 +257,7 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  spec.GitSecret,
-					DefaultMode: pointer.Int32(0600),
+					DefaultMode: ptr.To[int32](0600),
 				},
 			},
 		})
