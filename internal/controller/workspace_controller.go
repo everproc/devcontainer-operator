@@ -136,6 +136,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		"metadata.ownerReferences.kind": instance.Kind,
 		"metadata.ownerReferences.name": instance.Name,
 	})
+	if err != nil {
+		log.Error(err, "Failed to list owned deployments")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
 	// If size equals 0, we have a problem,
 	// if size equals 1 we are already in a healthy state,
 	// if size is greater than 1 we need to clean up
