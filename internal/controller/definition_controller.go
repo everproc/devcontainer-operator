@@ -668,7 +668,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 		// TODO (juf): make configurable
 		Image:           GIT_IMAGE_NAME,
 		ImagePullPolicy: corev1.PullAlways,
-		//Command:         []string{"/bin/sh", "-c", "sleep infinity"},
+		// Command:         []string{"/bin/sh", "-c", "sleep infinity"},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "REPO_URL",
