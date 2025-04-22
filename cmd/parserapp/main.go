@@ -94,7 +94,7 @@ func main() {
 	devContainerSpec := &parsing.DevContainerSpec{}
 	// converts non-conformant JSON to conformant JSON, e.g.,
 	//  strips comments, fixes trailing commas. For more info see hujson package.
-	data, err := hujson.Standardize([]byte(rawData))
+	data, err := hujson.Standardize(rawData)
 	if err != nil {
 		log.Error(err, "could not standardize json")
 		os.Exit(-1)
