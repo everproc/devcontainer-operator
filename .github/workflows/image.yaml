@@ -24,7 +24,7 @@ jobs:
           file: Dockerfile.parserapp
         - name: gitclone
           file: Dockerfile.gitclone
-        - name: devcontainer
+        - name: devcontainer-operator
           file: Dockerfile
         
 
