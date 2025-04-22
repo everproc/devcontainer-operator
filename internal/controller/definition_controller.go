@@ -36,7 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -598,7 +598,7 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = pointer.String(inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -641,7 +641,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  src.Spec.GitSecret,
-					DefaultMode: pointer.Int32(0600),
+					DefaultMode: ptr.To[int32](0600),
 				},
 			},
 		})
