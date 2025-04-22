@@ -451,10 +451,10 @@ func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Obj
 	key := client.ObjectKeyFromObject(obj)
 
 	// Try to get the resource
-	if err := r.Client.Get(ctx, key, obj); err != nil {
+	if err := r.Get(ctx, key, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist, create it
-			if err := r.Client.Create(ctx, obj); err != nil {
+			if err := r.Create(ctx, obj); err != nil {
 				return fmt.Errorf("failed to create resource: %w", err)
 			}
 			return nil

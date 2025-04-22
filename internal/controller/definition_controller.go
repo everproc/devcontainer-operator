@@ -93,7 +93,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Finalizer Section
 		finalizerName, executor := DefinitionFinalizerForRelatedWorkspaces()
 		// See documentation of the field, it's enlightning
-		if instance.ObjectMeta.DeletionTimestamp.IsZero() {
+		if instance.DeletionTimestamp.IsZero() {
 			// TODO(juf): AddFinalizer is probably idempotent and tells us if it's a no-op,
 			// so we probably could and should remove the Contains check. Only if it makes sense though.
 			if on == "yes" {
@@ -546,10 +546,10 @@ func (r *DefinitionReconciler) ensureResource(ctx context.Context, obj client.Ob
 	key := client.ObjectKeyFromObject(obj)
 
 	// Try to get the resource
-	if err := r.Client.Get(ctx, key, obj); err != nil {
+	if err := r.Get(ctx, key, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist, create it
-			if err := r.Client.Create(ctx, obj); err != nil {
+			if err := r.Create(ctx, obj); err != nil {
 				return fmt.Errorf("failed to create resource: %w", err)
 			}
 			return nil
