@@ -155,7 +155,7 @@ func main() {
 
 	var ports []corev1.ContainerPort
 	// len > 0 probably covers the nil check, remove in future
-	if devContainerSpec.Ports != nil && len(devContainerSpec.Ports) > 0 {
+	if len(devContainerSpec.Ports) > 0 {
 		ports = make([]corev1.ContainerPort, 0)
 		for port, meta := range devContainerSpec.Ports {
 			p, err := strconv.ParseInt(port, 10, 32)
