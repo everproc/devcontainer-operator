@@ -5,10 +5,8 @@ on:
   push:
     branches:
       - main
-# automatically version
     tags:
       - "v*.*.*"
-  workflow_dispatch:
 
 jobs:
   publish-containers:
