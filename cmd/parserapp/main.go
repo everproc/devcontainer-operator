@@ -42,7 +42,8 @@ func logDir(ctx context.Context, dir string) {
 	}
 }
 
-var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
+var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version +
+	"." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
 
 const DEFINITION_ENV_NAME = "DEFINITION_ENV_NAME"
 const DEFINITION_ENV_ID = "DEFINITION_ENV_ID"
@@ -91,7 +92,8 @@ func main() {
 		return
 	}
 	devContainerSpec := &parsing.DevContainerSpec{}
-	// converts non-conformant JSON to conformant JSON, e.g., strips comments, fixes trailing commas. For mroe info see hujson package.
+	// converts non-conformant JSON to conformant JSON, e.g.,
+	//  strips comments, fixes trailing commas. For mroe info see hujson package.
 	data, err := hujson.Standardize([]byte(rawData))
 	if err != nil {
 		log.Error(err, "could not standardize json")
