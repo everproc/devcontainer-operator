@@ -82,7 +82,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Error(err, "Failed to get instance")
 		return ctrl.Result{}, err
 	} // Let's just set the status as Unknown when no status is available
-	if instance.Status.Conditions == nil || len(instance.Status.Conditions) == 0 {
+	if len(instance.Status.Conditions) == 0 {
 		if err := r.updateStatusMany(ctx, req.NamespacedName, instance, devcontainerv1alpha1.InitialConditionsDefinition()); err != nil {
 			return ctrl.Result{}, err
 		}
