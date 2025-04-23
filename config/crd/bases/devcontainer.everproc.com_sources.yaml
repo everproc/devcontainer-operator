@@ -39,9 +39,7 @@ spec:
           spec:
             description: SourceSpec defines the desired state of Source.
             properties:
-              dockerRegistry:
-                type: string
-              dockerSecret:
+              containerRegistry:
                 type: string
               gitSecret:
                 description: The secret name that stores the SSH private key to download
@@ -49,6 +47,8 @@ spec:
                 type: string
               gitUrl:
                 description: The git url to download the repository.
+                type: string
+              registryCredentials:
                 type: string
             required:
             - gitUrl

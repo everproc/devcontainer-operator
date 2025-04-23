@@ -270,7 +270,7 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 }
 
 func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec, gitHash string) {
-	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.DockerRegistry, def.Spec.Source, gitHash)
+	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.ContainerRegistry, def.Spec.Source, gitHash)
 }
 
 func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {

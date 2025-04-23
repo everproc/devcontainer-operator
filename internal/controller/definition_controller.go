@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbac "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -259,13 +260,13 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// check if Dockerfile reference exists
 	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
-		podRes, err := r.ensureKanikoPod(ctx, instance, src, definitionID)
+		jobRes, err := r.ensureKanikoJob(ctx, instance, src, definitionID)
 		if err != nil {
-			return podRes, err
+			return jobRes, err
 		} else {
-			if !podRes.IsZero() {
-				log.Info("Ensure Kaniko Pod returned non-zero object")
-				return podRes, nil
+			if !jobRes.IsZero() {
+				log.Info("Ensure Kaniko job returned non-zero object")
+				return jobRes, nil
 			}
 		}
 	}
@@ -327,8 +328,8 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 		log.Info("Waiting for pod to be scheduled...")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	setupPod := &corev1.Pod{}
-	err := r.Get(ctx, types.NamespacedName{Name: r.setupPodName(instance), Namespace: instance.Namespace}, setupPod)
+	setupJob := &batchv1.Job{}
+	err := r.Get(ctx, types.NamespacedName{Name: r.setupJobName(instance), Namespace: instance.Namespace}, setupJob)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Not found, let's schedule the parse pod for creation")
@@ -338,10 +339,10 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 			return ctrl.Result{}, err
 		}
 	}
-	podDefinitionID := GetDefinitionIDLabel(setupPod)
+	podDefinitionID := GetDefinitionIDLabel(setupJob)
 	if podDefinitionID != definitionID {
 		log.Info("The current Pod does not match the given definitionID, deleting...")
-		if err := r.Delete(ctx, setupPod); err != nil {
+		if err := r.Delete(ctx, setupJob); err != nil {
 			if apierrors.IsNotFound(err) {
 				// Do nothing, the pod is somehow already gone
 			} else {
@@ -350,28 +351,28 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 		}
 		return createFn()
 	}
-	if !PodIsReadyOrFinished(setupPod) {
-		log.Info("Parse pod is not ready")
+	if !JobIsCompleted(setupJob) {
+		log.Info("Parse job is not complete")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	// Nothing to do continue
 	return ctrl.Result{}, nil
 }
 
-func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
-		pod, err := r.kanikoPod(instance, src, definitionID, WorkspacePVCName(instance))
+		job, err := r.kanikoJob(instance, src, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse Kaniko pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
 		}
-		AttachDefinitionIDLabel(pod, definitionID)
-		err = r.Create(ctx, pod)
+		AttachDefinitionIDLabel(job, definitionID)
+		err = r.Create(ctx, job)
 		if err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				log.Info("Kaniko pod already exists, rescheduling...")
@@ -388,8 +389,8 @@ func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *de
 		log.Info("Waiting for Kaniko pod to be scheduled...")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	kanikoPod := &corev1.Pod{}
-	err := r.Get(ctx, types.NamespacedName{Name: r.kanikoPodName(instance), Namespace: instance.Namespace}, kanikoPod)
+	kanikoJob := &batchv1.Job{}
+	err := r.Get(ctx, types.NamespacedName{Name: r.kanikoJobName(instance), Namespace: instance.Namespace}, kanikoJob)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Not found, let's schedule the parse Kaniko pod for creation")
@@ -399,10 +400,10 @@ func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *de
 			return ctrl.Result{}, err
 		}
 	}
-	podDefinitionID := GetDefinitionIDLabel(kanikoPod)
+	podDefinitionID := GetDefinitionIDLabel(kanikoJob)
 	if podDefinitionID != definitionID {
 		log.Info("The current Kaniko Pod does not match the given definitionID, deleting...")
-		if err := r.Delete(ctx, kanikoPod); err != nil {
+		if err := r.Delete(ctx, kanikoJob); err != nil {
 			if apierrors.IsNotFound(err) {
 				// Do nothing, the pod is somehow already gone
 			} else {
@@ -411,7 +412,7 @@ func (r *DefinitionReconciler) ensureKanikoPod(ctx context.Context, instance *de
 		}
 		return createFn()
 	}
-	if !PodIsReadyOrFinished(kanikoPod) {
+	if !JobIsCompleted(kanikoJob) {
 		log.Info("Kaniko pod is not ready")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -533,11 +534,11 @@ func WorkspacePVCName(inst *devcontainerv1alpha1.Definition) string {
 	return WorkspacePVCNameFromDefinitionName(inst.Name)
 }
 
-func (r *DefinitionReconciler) setupPodName(inst *devcontainerv1alpha1.Definition) string {
+func (r *DefinitionReconciler) setupJobName(inst *devcontainerv1alpha1.Definition) string {
 	return fmt.Sprintf("%s-setup", inst.Name)
 }
 
-func (r *DefinitionReconciler) kanikoPodName(inst *devcontainerv1alpha1.Definition) string {
+func (r *DefinitionReconciler) kanikoJobName(inst *devcontainerv1alpha1.Definition) string {
 	return fmt.Sprintf("%s-docker-build", inst.Name)
 }
 
@@ -685,29 +686,32 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 	return pvc, nil
 }
 
-func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*corev1.Pod, error) {
+func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
 	cloneContainer, err := r.gitCloneContainer(inst, src)
 	if err != nil {
 		return nil, err
 	}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.setupPodName(inst),
-			Namespace: inst.Namespace,
-		},
-		Spec: corev1.PodSpec{
-			ServiceAccountName: UtilServiceAccountName,
-			RestartPolicy:      corev1.RestartPolicyOnFailure,
-			Containers: []corev1.Container{
-				*cloneContainer,
-				r.parseContainer(inst, definitionID),
-			},
-			Volumes: []corev1.Volume{
-				{
-					Name: pvcName,
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: pvcName,
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
+		Name:      r.setupJobName(inst),
+		Namespace: inst.Namespace,
+	},
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: UtilServiceAccountName,
+					Containers: []corev1.Container{
+						*cloneContainer,
+						r.parseContainer(inst, definitionID),
+					},
+					RestartPolicy: corev1.RestartPolicyNever,
+					Volumes: []corev1.Volume{
+						{
+							Name: pvcName,
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: pvcName,
+								},
+							},
 						},
 					},
 				},
@@ -715,7 +719,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 		},
 	}
 	if src.Spec.GitSecret != "" {
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
 			Name: "git-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
@@ -726,78 +730,82 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 		})
 	}
 
-	AttachDefinitionIDLabel(pod, definitionID)
+	AttachDefinitionIDLabel(job, definitionID)
 
-	if err := ctrl.SetControllerReference(inst, pod, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(inst, job, r.Scheme); err != nil {
 		return nil, err
 	}
 
-	return pod, nil
+	return job, nil
 }
 
-func (r *DefinitionReconciler) kanikoPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*corev1.Pod, error) {
-	pod := &corev1.Pod{
+func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
+	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.kanikoPodName(inst),
+			Name:      r.kanikoJobName(inst),
 			Namespace: inst.Namespace,
 		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "kaniko",
-					Image: "gcr.io/kaniko-project/executor:latest",
-					Args: []string{
-						fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
-						"--context=dir://workspace",
-						fmt.Sprintf("--destination=%s/%s:%s", src.Spec.DockerRegistry, src.Name, inst.Parsed.Image),
-					},
-					VolumeMounts: []corev1.VolumeMount{
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
-							Name:      "docker-secret",
-							MountPath: "/kaniko/.docker",
-						},
-						{
-							Name:      pvcName,
-							MountPath: "/workspace",
-						},
-					},
-				},
-			},
-			RestartPolicy: corev1.RestartPolicyNever,
-			Volumes: []corev1.Volume{
-				{
-					Name: "docker-secret",
-					VolumeSource: corev1.VolumeSource{
-						Secret: &corev1.SecretVolumeSource{
-							SecretName: src.Spec.DockerSecret,
-							Items: []corev1.KeyToPath{
+							Name:  "kaniko",
+							Image: "gcr.io/kaniko-project/executor:latest",
+							Args: []string{
+								fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
+								"--context=dir://workspace",
+								fmt.Sprintf("--destination=%s/%s:%s", src.Spec.ContainerRegistry, src.Name, inst.Parsed.Image),
+							},
+							VolumeMounts: []corev1.VolumeMount{
 								{
-									Key:  ".dockerconfigjson",
-									Path: "config.json",
+									Name:      "docker-secret",
+									MountPath: "/kaniko/.docker",
+								},
+								{
+									Name:      pvcName,
+									MountPath: "/workspace",
+								},
+							},
+						},
+					},
+					RestartPolicy: corev1.RestartPolicyNever,
+					Volumes: []corev1.Volume{
+						{
+							Name: "docker-secret",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName: src.Spec.RegistryCredentials,
+									Items: []corev1.KeyToPath{
+										{
+											Key:  ".dockerconfigjson",
+											Path: "config.json",
+										},
+									},
+								},
+							},
+						},
+						{
+							Name: pvcName,
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: pvcName,
 								},
 							},
 						},
 					},
 				},
-				{
-					Name: pvcName,
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: pvcName,
-						},
-					},
-				},
 			},
 		},
 	}
 
-	AttachDefinitionIDLabel(pod, definitionID)
+	AttachDefinitionIDLabel(job, definitionID)
 
-	if err := ctrl.SetControllerReference(inst, pod, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(inst, job, r.Scheme); err != nil {
 		return nil, err
 	}
 
-	return pod, nil
+	return job, nil
 }
 
 func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) (*corev1.Container, error) {
