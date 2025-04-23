@@ -44,8 +44,11 @@ spec:
               dockerSecret:
                 type: string
               gitSecret:
+                description: The secret name that stores the SSH private key to download
+                  the private repository.
                 type: string
               gitUrl:
+                description: The git url to download the repository.
                 type: string
             required:
             - gitUrl

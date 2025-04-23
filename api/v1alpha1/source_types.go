@@ -23,10 +23,11 @@ import (
 // SourceSpec defines the desired state of Source.
 type SourceSpec struct {
 	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string
+	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string,description="The git url to download the repository."
+	// The git url to download the repository.
 	GitURL string `json:"gitUrl"`
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:printcolumn:JSONPath="spec.gitSecret",name=GitSecret,type=string
+	// The secret name that stores the SSH private key to download the private repository.
 	GitSecret string `json:"gitSecret"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.dockerRegistry",name=DockerRegistry,type=string
