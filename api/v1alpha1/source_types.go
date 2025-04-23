@@ -33,7 +33,7 @@ type SourceSpec struct {
 	ContainerRegistry string `json:"containerRegistry"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.dockerSecret",name=DockerSecret,type=string
-	DockerSecret string `json:"dockerSecret"`
+	RegistryCredentials string `json:"registryCredentials"`
 }
 
 // +kubebuilder:object:root=true
