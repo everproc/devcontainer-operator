@@ -15,7 +15,7 @@ then
     then
         mkdir -p /workspace/.tmp/git_status
     fi
-    touch /workspace/.tmp/git_status/clone_done && ls . && echo "DONE"
+    git rev-parse HEAD > /workspace/.tmp/git_status/clone_done && ls . && echo "DONE"
 else
     ls -lah
     echo "Already cloned"
@@ -23,6 +23,6 @@ else
     then
         mkdir -p /workspace/.tmp/git_status
     fi
-    touch /workspace/.tmp/git_status/clone_done
+    git rev-parse HEAD > /workspace/.tmp/git_status/clone_done
     exit 0
 fi

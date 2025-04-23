@@ -269,6 +269,10 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 	}
 }
 
+func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec, gitHash string) {
+	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.DockerRegistry, def.Spec.Source, gitHash)
+}
+
 func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
 	// Assume there is only one
 	volumeMounts := []corev1.VolumeMount{
@@ -423,8 +427,17 @@ func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Worksp
 		return nil, err
 	}
 
+	data := parsing.DevContainerSpec{}
+	err = json.Unmarshal([]byte(def.Parsed.RawDefinition), &data)
+	if err != nil {
+		return nil, err
+	}
+
 	r.injectPVC(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
 	r.injectSecret(spec, tpl)
+	if data.Build.Dockerfile != "" {
+		r.injectImage(def, spec, tpl, def.Parsed.GitHash)
+	}
 	injectContainerOverwrites(tpl)
 	depl := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
