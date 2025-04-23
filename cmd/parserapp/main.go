@@ -78,6 +78,19 @@ func main() {
 			break
 		}
 	}
+	gitHashReader, err := os.Open("/workspace/.tmp/git_status/clone_done")
+	if err != nil {
+		log.Error(err, fmt.Sprintf("could not open /workspace/.tmp/git_status/clone_done file: %v", err))
+		os.Exit(-1)
+		return
+	}
+	gitHashRaw, err := io.ReadAll(gitHashReader)
+	if err != nil {
+		log.Error(err, "could not read /workspace/.tmp/git_status/clone_done file: %v", err)
+		os.Exit(-1)
+		return
+	}
+
 	logDir(ctx, path.Dir(file))
 	reader, err := os.Open(file)
 	if err != nil {
@@ -92,9 +105,9 @@ func main() {
 		return
 	}
 	devContainerSpec := &parsing.DevContainerSpec{}
-	// converts non-conformant JSON to conformant JSON, e.g.,
-	//  strips comments, fixes trailing commas. For more info see hujson package.
-	data, err := hujson.Standardize(rawData)
+	// converts non-conformant JSON to conformant JSON, 
+  // e.g., strips comments, fixes trailing commas. For more info see hujson package.
+	data, err := hujson.Standardize([]byte(rawData))
 	if err != nil {
 		log.Error(err, "could not standardize json")
 		os.Exit(-1)
@@ -175,26 +188,30 @@ func main() {
 
 	targetDefinition.GenerateName = k8sResourceName + "-" // Set the name of the resource
 	targetDefinition.Namespace = namespace                // Set the namespace
-	targetDefinition.BinaryData["definition"], err = json.Marshal(devcontainerv1alpha1.ParsedDefinition{
+	parsedDefinition := devcontainerv1alpha1.ParsedDefinition{
 		Image: devContainerSpec.Image,
 		Build: devcontainerv1alpha1.BuildSpec(devContainerSpec.Build),
 		Run: devcontainerv1alpha1.RunSpec{
 			Args: orEmptySlice(devContainerSpec.RunArgs),
 		},
+		GitHash:       strings.TrimSpace(string(gitHashRaw)),
 		RawDefinition: string(rawData),
 		PodTpl: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
 					{
 						Name:            "main",
-						Image:           devContainerSpec.Image,
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Ports:           ports,
 					},
 				},
 			},
 		},
-	})
+	}
+	if devContainerSpec.Image != "" {
+		parsedDefinition.PodTpl.Spec.Containers[0].Image = devContainerSpec.Image
+	} // if empty, image gets injected after docker build
+	targetDefinition.BinaryData["definition"], err = json.Marshal(parsedDefinition)
 	attachDefinitionIDLabel(targetDefinition, k8sDefinitonID)
 	if err != nil {
 		log.Error(err, "Failed to json.Marshal ParsedData")

@@ -8,4 +8,6 @@ metadata:
 spec:
   gitUrl: "git@github.com:everproc/private-template-starter.git"
   gitSecret: "github-deploy-key"
+  dockerRegistry: "registry.autovia.io"
+  dockerSecret: docker
   # TODO(user): Add fields here
