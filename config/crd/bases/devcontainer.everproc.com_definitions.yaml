@@ -47,6 +47,7 @@ spec:
           metadata:
             type: object
           pasedDefinition:
+            description: The parsed devcontainer json.
             properties:
               build:
                 properties:
@@ -7975,6 +7976,7 @@ spec:
                 description: The git reference to checkout a specific hash or tag.
                 type: string
               source:
+                description: The reference to the devcontainer source.
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
