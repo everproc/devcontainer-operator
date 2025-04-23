@@ -30,7 +30,7 @@ type SourceSpec struct {
 	GitSecret string `json:"gitSecret"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.dockerRegistry",name=DockerRegistry,type=string
-	DockerRegistry string `json:"dockerRegistry"`
+	ContainerRegistry string `json:"containerRegistry"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.dockerSecret",name=DockerSecret,type=string
 	DockerSecret string `json:"dockerSecret"`
