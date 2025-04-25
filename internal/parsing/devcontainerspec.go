@@ -69,7 +69,7 @@ type Mount struct {
 	// `bind` mounts an existing persistentVolumeClaim
 	// `volume` automatically creates the persistentVolumeClaim that does not yet exist and mounts it.
 	Type string `json:"type,omitempty"`
-	// The persistentVolumeClaim name.
+	// The persistentVolumeClaim label src=<Source>.
 	Source string `json:"source,omitempty"`
 	// The path where the file or directory is mounted in the container. Must be an absolute path.
 	Target string `json:"target,omitempty"`

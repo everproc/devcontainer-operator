@@ -19,10 +19,12 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,15 +147,17 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// if size is greater than 1 we need to clean up
 	var currentDeployment *appsv1.Deployment
 	if len(ownedDeployments.Items) == 0 {
-		pvc, err := r.ensurePVC(ctx, instance)
+		pvc, err := r.ensureWorkspacePVC(ctx, instance)
 		if err != nil {
-			log.Error(err, "Failed to create PVC")
+			log.Error(err, "Failed to create workspace PVC")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &src.Spec, def, definitionID, pvc.Name)
+		mountPVCs, err := r.ensureMountPVCs(ctx, def, instance)
 		if err != nil {
-			return ctrl.Result{}, err
+			log.Error(err, "Failed to create additional mount PVCs")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
+		depl, err := r.createDeployment(ctx, instance, def.Parsed.PodTpl, &src.Spec, def, definitionID, pvc.Name, mountPVCs)
 		err = r.ensureResource(ctx, depl)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -204,7 +208,73 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func (r *WorkspaceReconciler) ensurePVC(ctx context.Context, inst *devcontainerv1alpha1.Workspace) (*corev1.PersistentVolumeClaim, error) {
+func (r *WorkspaceReconciler) ensureMountPVCs(ctx context.Context, def *devcontainerv1alpha1.Definition, inst *devcontainerv1alpha1.Workspace) ([]*corev1.PersistentVolumeClaim, error) {
+	log := log.FromContext(ctx)
+
+	data := parsing.DevContainerSpec{}
+	err := json.Unmarshal([]byte(def.Parsed.RawDefinition), &data)
+	if err != nil {
+		return nil, err
+	}
+
+	pvcs := []*corev1.PersistentVolumeClaim{}
+
+	if len(data.Mounts) > 0 {
+		for _, m := range data.Mounts {
+			if m.Type == "volume" {
+				pvcList := &corev1.PersistentVolumeClaimList{}
+				labels := map[string]string{
+					"owner":    inst.Spec.Owner,
+					"src":      m.Source,
+					"target":   base64.StdEncoding.EncodeToString([]byte(m.Target)),
+					"readonly": fmt.Sprintf("%v", m.Readonly),
+				}
+				err = r.List(ctx, pvcList, client.MatchingLabels(labels))
+				if err != nil {
+					log.Error(err, "Failed to query for existing PVCs")
+					return nil, err
+				}
+				if len(pvcList.Items) > 1 {
+					log.Info("WARNING: Two mount PVC with the same labels already exist, no new PVC will be created", "workspace", inst.Name)
+					// TODO: handle case where two PVCs with the same labels exists
+					pvcs = append(pvcs, &pvcList.Items[0])
+					continue
+				} else if len(pvcList.Items) == 1 {
+					log.Info("Mount PVC seems to already exist, no new PVC will be created", "workspace", inst.Name)
+					pvcs = append(pvcs, &pvcList.Items[0])
+					continue
+				}
+
+				pvc := &corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      names.SimpleNameGenerator.GenerateName("mount-"),
+						Namespace: inst.Namespace,
+						Labels:    labels,
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								// TODO: this should somehow be dynamic based on the git repo size
+								corev1.ResourceStorage: resource.MustParse("100Mi"),
+							},
+						},
+					},
+				}
+				err = r.ensureResource(ctx, pvc)
+				if err != nil {
+					return nil, err
+				}
+				pvcs = append(pvcs, pvc)
+			}
+		}
+	}
+	return pvcs, nil
+}
+
+func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devcontainerv1alpha1.Workspace) (*corev1.PersistentVolumeClaim, error) {
 	log := log.FromContext(ctx)
 	labels := map[string]string{
 		LabelDefinitionMapKey: GetDefinitionIDLabel(inst),
@@ -277,7 +347,7 @@ func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, 
 	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.ContainerRegistry, def.Spec.Source, gitHash)
 }
 
-func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
+func (r *WorkspaceReconciler) injectWorkspace(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
 	// Assume there is only one
 	volumeMounts := []corev1.VolumeMount{
 		{
@@ -314,6 +384,30 @@ func (r *WorkspaceReconciler) injectPVC(pvcName, gitUrl, gitDomain, gitHash stri
 				},
 			},
 		},
+	}
+}
+
+func (r *WorkspaceReconciler) injectMounts(tpl *corev1.PodTemplateSpec, mountPVCs []*corev1.PersistentVolumeClaim) {
+	for _, pvc := range mountPVCs {
+		readonly := false
+		// TODO handle errors
+		readonly, _ = strconv.ParseBool(pvc.Labels["readonly"])
+		target, _ := base64.StdEncoding.DecodeString(pvc.Labels["target"])
+		tpl.Spec.Containers[0].VolumeMounts = append(tpl.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      pvc.Name,
+				MountPath: string(target),
+				ReadOnly:  readonly,
+			})
+		tpl.Spec.Volumes = append(tpl.Spec.Volumes,
+			corev1.Volume{
+				Name: pvc.Name,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvc.Name,
+					},
+				},
+			})
 	}
 }
 
@@ -415,7 +509,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 	return nil
 }
 
-func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, spec *devcontainerv1alpha1.SourceSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string) (*appsv1.Deployment, error) {
+func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, spec *devcontainerv1alpha1.SourceSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
 		"app":          "devcontainer",
 		"definitionID": definitionID,
@@ -431,14 +525,17 @@ func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Worksp
 		return nil, err
 	}
 
+	r.injectWorkspace(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
+	r.injectSecret(spec, tpl)
+
 	data := parsing.DevContainerSpec{}
 	err = json.Unmarshal([]byte(def.Parsed.RawDefinition), &data)
 	if err != nil {
 		return nil, err
 	}
-
-	r.injectPVC(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
-	r.injectSecret(spec, tpl)
+	if len(mountPVCs) > 0 {
+		r.injectMounts(tpl, mountPVCs)
+	}
 	if data.Build.Dockerfile != "" {
 		r.injectImage(def, spec, tpl, def.Parsed.GitHash)
 	}
