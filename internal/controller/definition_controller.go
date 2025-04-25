@@ -37,7 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -83,7 +83,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Error(err, "Failed to get instance")
 		return ctrl.Result{}, err
 	} // Let's just set the status as Unknown when no status is available
-	if instance.Status.Conditions == nil || len(instance.Status.Conditions) == 0 {
+	if len(instance.Status.Conditions) == 0 {
 		if err := r.updateStatusMany(ctx, req.NamespacedName, instance, devcontainerv1alpha1.InitialConditionsDefinition()); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -94,7 +94,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Finalizer Section
 		finalizerName, executor := DefinitionFinalizerForRelatedWorkspaces()
 		// See documentation of the field, it's enlightning
-		if instance.ObjectMeta.DeletionTimestamp.IsZero() {
+		if instance.DeletionTimestamp.IsZero() {
 			// TODO(juf): AddFinalizer is probably idempotent and tells us if it's a no-op,
 			// so we probably could and should remove the Contains check. Only if it makes sense though.
 			if on == "yes" {
@@ -626,10 +626,10 @@ func (r *DefinitionReconciler) ensureResource(ctx context.Context, obj client.Ob
 	key := client.ObjectKeyFromObject(obj)
 
 	// Try to get the resource
-	if err := r.Client.Get(ctx, key, obj); err != nil {
+	if err := r.Get(ctx, key, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist, create it
-			if err := r.Client.Create(ctx, obj); err != nil {
+			if err := r.Create(ctx, obj); err != nil {
 				return fmt.Errorf("failed to create resource: %w", err)
 			}
 			return nil
@@ -678,7 +678,7 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = pointer.String(inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -724,7 +724,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  src.Spec.GitSecret,
-					DefaultMode: pointer.Int32(0600),
+					DefaultMode: ptr.To[int32](0600),
 				},
 			},
 		})
@@ -820,7 +820,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 		// TODO (juf): make configurable
 		Image:           GIT_IMAGE_NAME,
 		ImagePullPolicy: corev1.PullAlways,
-		//Command:         []string{"/bin/sh", "-c", "sleep infinity"},
+		// Command:         []string{"/bin/sh", "-c", "sleep infinity"},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "REPO_URL",

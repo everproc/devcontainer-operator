@@ -38,7 +38,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -136,6 +136,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		"metadata.ownerReferences.kind": instance.Kind,
 		"metadata.ownerReferences.name": instance.Name,
 	})
+	if err != nil {
+		log.Error(err, "Failed to list owned deployments")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
 	// If size equals 0, we have a problem,
 	// if size equals 1 we are already in a healthy state,
 	// if size is greater than 1 we need to clean up
@@ -238,7 +242,7 @@ func (r *WorkspaceReconciler) ensurePVC(ctx context.Context, inst *devcontainerv
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = pointer.String(inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -257,7 +261,7 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  spec.GitSecret,
-					DefaultMode: pointer.Int32(0600),
+					DefaultMode: ptr.To[int32](0600),
 				},
 			},
 		})
@@ -464,10 +468,10 @@ func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Obj
 	key := client.ObjectKeyFromObject(obj)
 
 	// Try to get the resource
-	if err := r.Client.Get(ctx, key, obj); err != nil {
+	if err := r.Get(ctx, key, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist, create it
-			if err := r.Client.Create(ctx, obj); err != nil {
+			if err := r.Create(ctx, obj); err != nil {
 				return fmt.Errorf("failed to create resource: %w", err)
 			}
 			return nil

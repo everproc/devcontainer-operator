@@ -34,7 +34,7 @@ func (cmd Cmd) MarshalJSON() ([]byte, error) {
 	if cmd.Array != nil {
 		return json.Marshal(cmd.Array)
 	}
-	return nil, errors.New("Neither string nor array of cmd are defined, cannot marshal json")
+	return nil, errors.New("neither string nor array of cmd are defined, cannot marshal json")
 }
 
 type DevContainerSpec struct {
