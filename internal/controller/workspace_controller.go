@@ -229,7 +229,7 @@ func (r *WorkspaceReconciler) ensureMountPVCs(ctx context.Context, def *devconta
 					"target":   base64.StdEncoding.EncodeToString([]byte(m.Target)),
 					"readonly": fmt.Sprintf("%v", m.Readonly),
 				}
-				err = r.List(ctx, pvcList, client.MatchingLabels(labels))
+				err = r.List(ctx, pvcList, client.MatchingLabels(labels), client.InNamespace(inst.Namespace))
 				if err != nil {
 					log.Error(err, "Failed to query for existing PVCs")
 					return nil, err
