@@ -8,10 +8,10 @@ The current version of the devcontainer-operator supports a subset of [DevContai
 
 ## Quickstart
 
-The basic installation creates the `devcontainer` namespace with all resources needed to run the operator. **NOTE** If you want to build Docker images on Kubernetes the build conatainer runs as privileged. Please check your Pod Security Standards for the `devcontainer` namespace.
+The basic installation creates the `devcontainer-operator` namespace with all resources needed to run the operator. **NOTE** If you want to build Docker images on Kubernetes the build conatainer runs as privileged. Please check your Pod Security Standards for the `devcontainer-operator` namespace.
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/everproc/devcontainer-operator/main/deploy/devcontainer-operator.latest.yaml
+kubectl create -f https://raw.githubusercontent.com/everproc/devcontainer-operator/main/dist/install.yaml
 ```
 
 Once the operator is running, create a Workspace CR with a git repository URL that contains a [devcontainer.json](https://containers.dev/).
@@ -25,5 +25,4 @@ spec:
   gitUrl: https://github.com/devcontainers/template-starter
 ```
 
-Depending on your `devcontainer.json` specified IDE you can exec into the workspace container or connect your IDE over SSH or other protocols. 
-
+Depending on your `devcontainer.json` specified IDE you can exec into the workspace container or connect your IDE over SSH or other protocols.
