@@ -1,0 +1,42 @@
+name: Create Cluster
+
+on:
+  push:
+    branches:
+      - kind-testing
+
+jobs:
+  create-cluster:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          ref: docs
+      - name: Install jq
+        uses: dcarbone/install-jq-action@v3.1.1
+      - name: Running Tests
+        run: |
+          kubectl get no
+          kubectl create -f dist/install.yaml
+          kubectl config set-context --current --namespace devcontainer-operator
+          kubectl apply -f config/samples/devcontainer_v1alpha1_python_jupyter_definition.yaml
+          kubectl apply -f config/samples/devcontainer_v1alpha1_source_python_jupyter.yaml
+          kubectl apply -f config/samples/devcontainer_v1alpha1_workspace_jupyter_with_port.yaml
+          cat << 'EOF' > wait.sh
+          #!/bin/bash
+          echo "wait until workspace is running..."
+          while :
+          do
+              POD=$(kubectl get po --selector app=devcontainer -o wide --no-headers | awk '{print $3}')
+              if [[ "$POD" == "Running" ]]; then
+                  break
+              fi
+              kubectl get po
+              sleep 30
+          done
+          EOF
+          chmod +x wait.sh && ./wait.sh
+          kubectl exec -it $(kubectl get po --selector app=devcontainer -ojson | jq '.items[0].metadata.name' -r) -c main -- cat /workspace/.devcontainer/devcontainer.json
