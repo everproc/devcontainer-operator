@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type Cmd struct {
@@ -37,6 +38,81 @@ func (cmd Cmd) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("neither string nor array of cmd are defined, cannot marshal json")
 }
 
+type Feature struct {
+	// TODO(juf): implement
+	// Requires custom de/serialize for nicer handling
+	Name    string
+	Version string
+	Hash    string
+	Options map[string]any
+}
+
+type FeatureList struct {
+	Features []Feature
+}
+
+func parseDependency(s string) (*Feature, error) {
+	isVersion := false
+	splitIdx := strings.Index(s, "@")
+	if splitIdx == -1 {
+		splitIdx = strings.Index(s, ":")
+		if splitIdx == -1 {
+			// TOOD(juf): Make this a concrete type
+			return nil, fmt.Errorf("Dependency must specify hash or version tag, none give: %s", s)
+		}
+		isVersion = true
+	}
+	d := &Feature{}
+	d.Name = s[0:splitIdx]
+	versionOrHash := s[splitIdx+1:]
+	if isVersion {
+		d.Version = versionOrHash
+	} else {
+		d.Hash = versionOrHash
+	}
+	return d, nil
+
+}
+
+func (d *FeatureList) UnmarshalJSON(b []byte) error {
+	raw := map[string]map[string]any{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for k, v := range raw {
+		dep, err := parseDependency(k)
+		if err != nil {
+			return err
+		}
+		dep.Options = v
+		d.Features = append(d.Features, *dep)
+	}
+	return nil
+}
+
+type FeatureSpec struct {
+	ID               string         `json:"id"`      // Required
+	Version          string         `json:"version"` // Required
+	Name             string         `json:"name"`    // Required
+	Description      string         `json:"description,omitempty"`
+	DocumentationURL string         `json:"documentationURL,omitempty"`
+	LicenseURL       string         `json:"licenseURL,omitempty"`
+	Keywords         []string       `json:"keywords,omitempty"`
+	Options          map[string]any `json:"options,omitempty"`
+	ContainerEnv     map[string]any `json:"containerEnv,omitempty"`
+	Privileged       bool           `json:"privileged,omitempty"`
+	Init             bool           `json:"init,omitempty"`
+	CapAdd           []string       `json:"capAdd,omitempty"`
+	SecurityOpt      []string       `json:"securityOpt,omitempty"`
+	Entrypoint       string         `json:"entrypoint,omitempty"`
+	Customizations   map[string]any `json:"customizations,omitempty"`
+	DependsOn        FeatureList    `json:"dependsOn,omitempty"`
+	InstallsAfter    []string       `json:"installsAfter,omitempty"`
+	LegacyIDs        []string       `json:"legacyIds,omitempty"`
+	Deprecated       bool           `json:"deprecated,omitempty"`
+	Mounts           map[string]any `json:"mounts,omitempty"`
+}
+
 // https://containers.dev/implementors/json_reference/
 type DevContainerSpec struct {
 	// A name for the dev container displayed in the UI.
@@ -61,6 +137,8 @@ type DevContainerSpec struct {
 	PostStartCommand *Cmd `json:"postStartCommand"`
 	// Add additional mounts to a container.
 	Mounts []*Mount `json:"mounts,omitempty"`
+	// Augment devcontainer with a list of features
+	Features FeatureList `json:"features"`
 }
 
 // https://docs.docker.com/engine/storage/bind-mounts/#options-for---mount
@@ -82,12 +160,12 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" || string(data) == `""` {
 		return nil
 	}
-	var j interface{}
+	var j any
 	if err := json.Unmarshal(data, &j); err != nil {
 		return err
 	}
 
-	if r, ok := j.(map[string]interface{}); ok {
+	if r, ok := j.(map[string]any); ok {
 		if t, ok := r["type"].(string); ok {
 			m.Type = t
 		}
