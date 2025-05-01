@@ -23,7 +23,7 @@ This page documents devcontainer standard supported by the devcontainer-operator
 | `capAdd` | |
 | `securityOpt` | |
 | `mounts` | :white_check_mark: |
-| `features` | |
+| `features` | :construction: |
 | `overrideFeatureInstallOrder` | |
 | `customizations` | |
 
@@ -74,4 +74,3 @@ This page documents devcontainer standard supported by the devcontainer-operator
 | `onAutoForward` | |
 | `requireLocalPort` | |
 | `elevateIfNeeded` | |
-
