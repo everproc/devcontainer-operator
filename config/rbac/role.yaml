@@ -46,9 +46,9 @@ rules:
 - apiGroups:
   - devcontainer.everproc.com
   resources:
+  - builders
   - definitions
   - sources
-  - workspaces
   verbs:
   - create
   - delete
@@ -60,17 +60,17 @@ rules:
 - apiGroups:
   - devcontainer.everproc.com
   resources:
+  - builders/finalizers
   - definitions/finalizers
   - sources/finalizers
-  - workspaces/finalizers
   verbs:
   - update
 - apiGroups:
   - devcontainer.everproc.com
   resources:
+  - builders/status
   - definitions/status
   - sources/status
-  - workspaces/status
   verbs:
   - get
   - patch

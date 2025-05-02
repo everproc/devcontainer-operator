@@ -5,6 +5,7 @@ resources:
 - bases/devcontainer.everproc.com_sources.yaml
 - bases/devcontainer.everproc.com_definitions.yaml
 - bases/devcontainer.everproc.com_workspaces.yaml
+- bases/devcontainer.everproc.com_builders.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

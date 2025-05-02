@@ -1,9 +1,10 @@
 apiVersion: devcontainer.everproc.com/v1alpha1
-kind: Workspace
+kind: Builder
 metadata:
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: jupyter-workspace-sample
+  name: jupyter-builder-sample
 spec:
-  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  definitionRef: jupyter-sample
+  owner: julius

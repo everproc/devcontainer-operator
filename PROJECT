@@ -35,4 +35,13 @@ resources:
   kind: Workspace
   path: everproc.com/devcontainer/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: everproc.com
+  group: devcontainer
+  kind: Builder
+  path: everproc.com/devcontainer/api/v1alpha1
+  version: v1alpha1
 version: "3"

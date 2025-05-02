@@ -3,6 +3,7 @@ package controller
 import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func PodIsReadyOrFinished(pod *corev1.Pod) bool {
@@ -24,6 +25,15 @@ func PodIsReadyOrFinished(pod *corev1.Pod) bool {
 func JobIsCompleted(job *batchv1.Job) bool {
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func IsReadyAndFinished(conditions []metav1.Condition) bool {
+	for _, cond := range conditions {
+		if cond.Type == "Ready" && cond.Status == "True" {
 			return true
 		}
 	}

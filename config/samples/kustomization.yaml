@@ -6,4 +6,5 @@ resources:
 - devcontainer_v1alpha1_source_python_jupyter.yaml
 - devcontainer_v1alpha1_workspace_jupyter_with_port.yaml
 - devcontainer_v1alpha1_python_jupyter_definition.yaml
+- devcontainer_v1alpha1_builder.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,9 +1,11 @@
 apiVersion: devcontainer.everproc.com/v1alpha1
-kind: Workspace
+kind: Builder
 metadata:
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: jupyter-workspace-sample
+  name: builder-sample
 spec:
-  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  definitionRef: my-definition-sample
+  owner: jan
+  storageClassName: openebs-rwx

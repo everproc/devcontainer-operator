@@ -22,25 +22,34 @@ import (
 
 // WorkspaceSpec defines the desired state of Workspace.
 type WorkspaceSpec struct {
-	// TODO (juf): Should we use a PodSpecTemplate approach here or not? Need to do research
-	// DefinitionSpecTemplate DefinitionSpecTemplate `json:"definition_spec_template"`
-
 	// +kubebuilder:validation:Required
-	// The owner of this workspace
+	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string,description="The git url to download the repository."
+	// The git url to download the repository.
+	GitURL string `json:"gitUrl"`
+	// +kubebuilder:validation:Optional
+	// The secret name that stores the SSH private key to download the private repository.
+	GitSecret string `json:"gitSecret"`
+	// +kubebuilder:validation:Optional
+	// The git reference to checkout a specific hash or tag.
+	GitHashOrTag string `json:"gitHashOrTag"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:printcolumn:JSONPath="spec.containerRegistry",name=ContainerRegistry,type=string
+	ContainerRegistry string `json:"containerRegistry"`
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
+	RegistryCredentials string `json:"registryCredentials"`
+	// +kubebuilder:validation:Optional
+	// The owner of this builder
 	Owner string `json:"owner"`
-
-	// +kubebuilder:validation:Required
-	// The link to the workspace definition
-	DefinitionRef string `json:"definitionRef"`
-
 	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
 	StorageClassName string `json:"storageClassName"`
 }
 
 const (
-	WorkspaceCondTypeInUse = "InUse"
-	WorkspaceCondTypeReady = "Ready"
+	WorkspaceCondTypePending = "Pending"
+	WorkspaceCondTypeInUse   = "InUse"
+	WorkspaceCondTypeReady   = "Ready"
 )
 
 func initialConditionsWorkspace() []metav1.Condition {
@@ -61,6 +70,7 @@ func initialConditionsWorkspace() []metav1.Condition {
 // WorkspaceStatus defines the observed state of Workspace.
 type WorkspaceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	// Reference to the source responsible for storing the external resources
 }
 
 // +kubebuilder:object:root=true

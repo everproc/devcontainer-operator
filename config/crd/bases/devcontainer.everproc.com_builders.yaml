@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.4
-  name: workspaces.devcontainer.everproc.com
+  name: builders.devcontainer.everproc.com
 spec:
   group: devcontainer.everproc.com
   names:
-    kind: Workspace
-    listKind: WorkspaceList
-    plural: workspaces
-    singular: workspace
+    kind: Builder
+    listKind: BuilderList
+    plural: builders
+    singular: builder
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Workspace is the Schema for the workspaces API.
+        description: Builder is the Schema for the builders API.
         properties:
           apiVersion:
             description: |-
@@ -47,33 +47,23 @@ spec:
           metadata:
             type: object
           spec:
-            description: WorkspaceSpec defines the desired state of Workspace.
+            description: BuilderSpec defines the desired state of Builder.
             properties:
-              containerRegistry:
-                type: string
-              gitHashOrTag:
-                description: The git reference to checkout a specific hash or tag.
-                type: string
-              gitSecret:
-                description: The secret name that stores the SSH private key to download
-                  the private repository.
-                type: string
-              gitUrl:
-                description: The git url to download the repository.
+              definitionRef:
+                description: The link to the builder definition
                 type: string
               owner:
                 description: The owner of this builder
-                type: string
-              registryCredentials:
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
                 type: string
             required:
-            - gitUrl
+            - definitionRef
+            - owner
             type: object
           status:
-            description: WorkspaceStatus defines the observed state of Workspace.
+            description: BuilderStatus defines the observed state of Builder.
             properties:
               conditions:
                 items:

@@ -1,0 +1,27 @@
+# permissions for end users to edit builders.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: devcontainer
+    app.kubernetes.io/managed-by: kustomize
+  name: builder-editor-role
+rules:
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - builders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - devcontainer.everproc.com
+  resources:
+  - builders/status
+  verbs:
+  - get

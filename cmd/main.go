@@ -167,10 +167,17 @@ func main() {
 	}
 	if err = (&controller.WorkspaceReconciler{
 		Client: mgr.GetClient(),
-		Config: mgr.GetConfig(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
+		os.Exit(1)
+	}
+	if err = (&controller.BuilderReconciler{
+		Client: mgr.GetClient(),
+		Config: mgr.GetConfig(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Builder")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -69,6 +69,7 @@ type ParsedDefinition struct {
 }
 
 const (
+	DefinitionCondTypePending      = "Pending"
 	DefinitionCondTypeReady        = "Ready"
 	DefinitionCondTypeParsed       = "Parsed"
 	DefinitionCondTypeBuilt        = "Built"
