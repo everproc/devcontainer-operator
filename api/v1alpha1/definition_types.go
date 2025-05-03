@@ -49,7 +49,7 @@ type DefinitionSpec struct {
 	GitHashOrTag string `json:"gitHashOrTag"`
 	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
-	StorageClassName string `json:"storageClassName"`
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 // The parsed devcontainer json.

@@ -7,3 +7,4 @@ metadata:
   name: jupyter-workspace-sample
 spec:
   gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  gitHashOrTag: master

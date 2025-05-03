@@ -285,11 +285,14 @@ func (r *BuilderReconciler) ensureBuilderPVC(ctx context.Context, inst *devconta
 		log.Error(err, "Failed to query for existing PVCs")
 		return nil, err
 	}
-	if len(pvcList.Items) > 0 {
+	if len(pvcList.Items) == 1 {
 		log.Info("PVC seems to already exist, no new PVC will be created", "builder", inst.Name)
-		return nil, nil
-	} else {
+		return &pvcList.Items[0], nil
+	} else if len(pvcList.Items) == 0 {
 		log.Info("Did not found a matching PVC, let's schedule it", "builder", inst.Name)
+	} else if len(pvcList.Items) > 1 {
+		log.Info("Two or more PVCs exists with the same definitionID", "builder", inst.Name)
+		return nil, nil
 	}
 
 	pvcName := names.SimpleNameGenerator.GenerateName("wkspce-")

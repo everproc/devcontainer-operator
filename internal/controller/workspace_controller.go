@@ -153,7 +153,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		def.Spec.Source = source.Name
 		def.Spec.GitHashOrTag = workspace.Spec.GitHashOrTag
-		def.Spec.StorageClassName = workspace.Spec.StorageClassName
+		if workspace.Spec.StorageClassName != "" {
+			def.Spec.StorageClassName = workspace.Spec.StorageClassName
+		}
 
 		if err := ctrl.SetControllerReference(&workspace, &def, r.Scheme); err != nil {
 			log.Error(err, "Failed to set reference, definition owned by workspace ")
@@ -198,9 +200,15 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			"ownerReferenceName": workspace.Name,
 			"ownerReferenceUID":  string(workspace.UID),
 		}
-		builder.Spec.Owner = workspace.Spec.Owner
+		if workspace.Spec.Owner == "" {
+			builder.Spec.Owner = workspace.Name
+		} else {
+			builder.Spec.Owner = workspace.Spec.Owner
+		}
 		builder.Spec.DefinitionRef = def.Name
-		builder.Spec.StorageClassName = workspace.Spec.StorageClassName
+		if workspace.Spec.StorageClassName != "" {
+			builder.Spec.StorageClassName = workspace.Spec.StorageClassName
+		}
 
 		if err := ctrl.SetControllerReference(&workspace, &builder, r.Scheme); err != nil {
 			log.Error(err, "Failed to set reference, builder owned by workspace ")

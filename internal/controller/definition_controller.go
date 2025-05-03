@@ -361,10 +361,6 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 
 func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	if IsReadyAndFinished(instance.Status.Conditions) {
-		log.Info("Waiting for Definition to get the final parser result status")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")

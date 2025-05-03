@@ -28,13 +28,13 @@ type SourceSpec struct {
 	GitURL string `json:"gitUrl"`
 	// +kubebuilder:validation:Optional
 	// The secret name that stores the SSH private key to download the private repository.
-	GitSecret string `json:"gitSecret"`
+	GitSecret string `json:"gitSecret,omitempty"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.dockerRegistry",name=DockerRegistry,type=string
-	ContainerRegistry string `json:"containerRegistry"`
+	ContainerRegistry string `json:"containerRegistry,omitempty"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
-	RegistryCredentials string `json:"registryCredentials"`
+	RegistryCredentials string `json:"registryCredentials,omitempty"`
 }
 
 // +kubebuilder:object:root=true

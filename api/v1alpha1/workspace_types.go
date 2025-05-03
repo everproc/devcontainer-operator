@@ -28,22 +28,22 @@ type WorkspaceSpec struct {
 	GitURL string `json:"gitUrl"`
 	// +kubebuilder:validation:Optional
 	// The secret name that stores the SSH private key to download the private repository.
-	GitSecret string `json:"gitSecret"`
+	GitSecret string `json:"gitSecret,omitempty"`
 	// +kubebuilder:validation:Optional
 	// The git reference to checkout a specific hash or tag.
-	GitHashOrTag string `json:"gitHashOrTag"`
+	GitHashOrTag string `json:"gitHashOrTag,omitempty"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.containerRegistry",name=ContainerRegistry,type=string
-	ContainerRegistry string `json:"containerRegistry"`
+	ContainerRegistry string `json:"containerRegistry,omitempty"`
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
-	RegistryCredentials string `json:"registryCredentials"`
+	RegistryCredentials string `json:"registryCredentials,omitempty"`
 	// +kubebuilder:validation:Optional
 	// The owner of this builder
-	Owner string `json:"owner"`
+	Owner string `json:"owner,omitempty"`
 	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
-	StorageClassName string `json:"storageClassName"`
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 const (

@@ -35,7 +35,7 @@ type BuilderSpec struct {
 
 	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
-	StorageClassName string `json:"storageClassName"`
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 const (
