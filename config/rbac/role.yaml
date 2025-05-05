@@ -47,7 +47,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions
-  - sources
   - workspaces
   verbs:
   - create
@@ -61,7 +60,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions/finalizers
-  - sources/finalizers
   - workspaces/finalizers
   verbs:
   - update
@@ -69,7 +67,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions/status
-  - sources/status
   - workspaces/status
   verbs:
   - get

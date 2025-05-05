@@ -118,15 +118,6 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Info("Definition is not in a ready state yet", "definitionID", instance.Spec.DefinitionRef)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	src := &devcontainerv1alpha1.Source{}
-	err = r.Get(ctx, types.NamespacedName{Namespace: def.Namespace, Name: def.Spec.Source}, src)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Error(err, "Source of Definition not found, requeing", "definitionID", instance.Spec.DefinitionRef)
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		}
-		return ctrl.Result{}, err
-	}
 	// TODO (juf): Assert this is non-empty
 	definitionID := GetDefinitionIDLabel(def)
 
@@ -157,7 +148,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create additional mount PVCs")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(ctx, instance, def.Parsed.PodTpl, &src.Spec, def, definitionID, pvc.Name, mountPVCs)
+		depl, err := r.createDeployment(ctx, instance, def.Parsed.PodTpl, def, definitionID, pvc.Name, mountPVCs)
 		err = r.ensureResource(ctx, depl)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -285,11 +276,14 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 		log.Error(err, "Failed to query for existing PVCs")
 		return nil, err
 	}
-	if len(pvcList.Items) > 0 {
-		log.Info("PVC seems to already exist, no new PVC will be created", "workspace", inst.Name)
+	if len(pvcList.Items) == 1 {
+		log.Info("PVC seems to already exist, no new PVC will be created", "builder", inst.Name)
+		return &pvcList.Items[0], nil
+	} else if len(pvcList.Items) == 0 {
+		log.Info("Did not found a matching PVC, let's schedule it", "builder", inst.Name)
+	} else if len(pvcList.Items) > 1 {
+		log.Info("Two or more PVCs exists with the same definitionID", "builder", inst.Name)
 		return nil, nil
-	} else {
-		log.Info("Did not found a matching PVC, let's schedule it", "workspace", inst.Name)
 	}
 
 	pvcName := names.SimpleNameGenerator.GenerateName("wkspce-")
@@ -324,13 +318,13 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 	return pvc, nil
 }
 
-func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec) {
-	if spec.GitSecret != "" {
+func (r *WorkspaceReconciler) injectSecret(def *devcontainerv1alpha1.Definition, tpl *corev1.PodTemplateSpec) {
+	if def.Spec.GitSecret != "" {
 		tpl.Spec.Volumes = append(tpl.Spec.Volumes, corev1.Volume{
 			Name: "git-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName:  spec.GitSecret,
+					SecretName:  def.Spec.GitSecret,
 					DefaultMode: ptr.To[int32](0600),
 				},
 			},
@@ -343,8 +337,8 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 	}
 }
 
-func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec, gitHash string) {
-	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.ContainerRegistry, def.Spec.Source, gitHash)
+func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, tpl *corev1.PodTemplateSpec, gitHash string) {
+	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", def.Spec.ContainerRegistry, def.Name, gitHash)
 }
 
 func (r *WorkspaceReconciler) injectWorkspace(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
@@ -509,7 +503,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 	return nil
 }
 
-func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, spec *devcontainerv1alpha1.SourceSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
+func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
 		"app":          "devcontainer",
 		"definitionID": definitionID,
@@ -520,13 +514,13 @@ func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcon
 	// TODO(juf): Debattable
 	tpl.Labels = maps.UnionInPlace(tpl.Labels, selectorLabels)
 
-	gitDomain, err := ParseGitUrl(spec.GitURL)
+	gitDomain, err := ParseGitUrl(def.Spec.GitURL)
 	if err != nil {
 		return nil, err
 	}
 
-	r.injectWorkspace(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
-	r.injectSecret(spec, tpl)
+	r.injectWorkspace(pvcName, def.Spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
+	r.injectSecret(def, tpl)
 
 	data := parsing.DevContainerSpec{}
 	err = json.Unmarshal([]byte(def.Parsed.RawDefinition), &data)
@@ -537,7 +531,7 @@ func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcon
 		r.injectMounts(tpl, mountPVCs)
 	}
 	if data.Build.Dockerfile != "" {
-		r.injectImage(def, spec, tpl, def.Parsed.GitHash)
+		r.injectImage(def, tpl, def.Parsed.GitHash)
 	}
 	injectContainerOverwrites(tpl)
 	depl := &appsv1.Deployment{

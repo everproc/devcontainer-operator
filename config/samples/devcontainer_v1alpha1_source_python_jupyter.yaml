@@ -1,9 +1,0 @@
-apiVersion: devcontainer.everproc.com/v1alpha1
-kind: Source
-metadata:
-  labels:
-    app.kubernetes.io/name: devcontainer
-    app.kubernetes.io/managed-by: kustomize
-  name: jupyter-python-template-starter
-spec:
-  gitUrl: 'https://github.com/daemonfire300/sample-jupyter-devcontainer.git'

@@ -7980,18 +7980,26 @@ spec:
           spec:
             description: DefinitionSpec defines the desired state of Definition.
             properties:
+              containerRegistry:
+                type: string
               gitHashOrTag:
                 description: The git reference to checkout a specific hash or tag.
                 type: string
-              source:
-                description: The reference to the devcontainer source.
+              gitSecret:
+                description: The secret name that stores the SSH private key to download
+                  the private repository.
+                type: string
+              gitUrl:
+                description: The git url to download the repository.
+                type: string
+              registryCredentials:
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
                 type: string
             required:
             - gitHashOrTag
-            - source
+            - gitUrl
             type: object
           status:
             description: DefinitionStatus defines the observed state of Definition.
@@ -8052,66 +8060,6 @@ spec:
                   - type
                   type: object
                 type: array
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
----
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  annotations:
-    controller-gen.kubebuilder.io/version: v0.16.4
-  name: sources.devcontainer.everproc.com
-spec:
-  group: devcontainer.everproc.com
-  names:
-    kind: Source
-    listKind: SourceList
-    plural: sources
-    singular: source
-  scope: Namespaced
-  versions:
-  - name: v1alpha1
-    schema:
-      openAPIV3Schema:
-        description: Source is the Schema for the sources API.
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: SourceSpec defines the desired state of Source.
-            properties:
-              containerRegistry:
-                type: string
-              gitSecret:
-                description: The secret name that stores the SSH private key to download
-                  the private repository.
-                type: string
-              gitUrl:
-                description: The git url to download the repository.
-                type: string
-              registryCredentials:
-                type: string
-            required:
-            - gitUrl
             type: object
         type: object
     served: true
@@ -8396,7 +8344,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions
-  - sources
   - workspaces
   verbs:
   - create
@@ -8410,7 +8357,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions/finalizers
-  - sources/finalizers
   - workspaces/finalizers
   verbs:
   - update
@@ -8418,7 +8364,6 @@ rules:
   - devcontainer.everproc.com
   resources:
   - definitions/status
-  - sources/status
   - workspaces/status
   verbs:
   - get
@@ -8476,56 +8421,6 @@ metadata:
 rules:
 - nonResourceURLs:
   - /metrics
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: devcontainer
-  name: devcontainer-source-editor-role
-rules:
-- apiGroups:
-  - devcontainer.everproc.com
-  resources:
-  - sources
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - devcontainer.everproc.com
-  resources:
-  - sources/status
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: devcontainer
-  name: devcontainer-source-viewer-role
-rules:
-- apiGroups:
-  - devcontainer.everproc.com
-  resources:
-  - sources
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - devcontainer.everproc.com
-  resources:
-  - sources/status
   verbs:
   - get
 ---
@@ -8671,7 +8566,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: docker.io/everproc/devcontainer-operator:0.0.2
+        image: ghcr.io/everproc/devcontainer-operator:0.0.2
         livenessProbe:
           httpGet:
             path: /healthz

@@ -125,20 +125,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	src := &devcontainerv1alpha1.Source{}
-	err = r.Get(ctx, types.NamespacedName{Name: instance.Spec.Source, Namespace: instance.Namespace}, src)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionFalse, Reason: "MissingSource", Message: fmt.Sprintf("Source %q is missing", instance.Spec.Source)}); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Try again
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{}, err
-	}
-
-	definitionID := definitionID(instance, src)
+	definitionID := definitionID(instance)
 	previousDefinitionID := GetDefinitionIDLabel(instance)
 	if previousDefinitionID == "" {
 		log.Info("Definition does not have a git hash based ID yet", "definitionID", definitionID)
@@ -175,7 +162,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
 
-	podRes, err := r.ensureSetupPod(ctx, instance, src, definitionID)
+	podRes, err := r.ensureSetupPod(ctx, instance, definitionID)
 	if err != nil {
 		return podRes, err
 	} else {
@@ -260,7 +247,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// check if Dockerfile reference exists
 	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
-		jobRes, err := r.ensureKanikoJob(ctx, instance, src, definitionID)
+		jobRes, err := r.ensureKanikoJob(ctx, instance, definitionID)
 		if err != nil {
 			return jobRes, err
 		} else {
@@ -298,14 +285,14 @@ func patchDefinitionIDLabel(newDefinitionID string) client.Patch {
 	return client.RawPatch(types.JSONPatchType, op)
 }
 
-func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionUnknown, Reason: "ProvisioningPodParse", Message: "Provisioning Parse Pod"}); err != nil {
 			log.Info("Failed to update status during pod setup")
 			return ctrl.Result{}, err
 		}
-		pod, err := r.setupPod(instance, src, definitionID, WorkspacePVCName(instance))
+		pod, err := r.setupPod(instance, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
@@ -359,14 +346,14 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 	return ctrl.Result{}, nil
 }
 
-func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
-		job, err := r.kanikoJob(instance, src, definitionID, WorkspacePVCName(instance))
+		job, err := r.kanikoJob(instance, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse Kaniko pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
@@ -478,9 +465,9 @@ func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devconta
 	return ctrl.Result{}, nil
 }
 
-func definitionID(instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) string {
+func definitionID(instance *devcontainerv1alpha1.Definition) string {
 	h := sha1.New()
-	_, err := io.WriteString(h, instance.Name+instance.Spec.GitHashOrTag+src.Spec.GitURL)
+	_, err := io.WriteString(h, instance.Name+instance.Spec.GitHashOrTag+instance.Spec.GitURL)
 	if err != nil {
 		panic(fmt.Errorf("could not generate definitionID: %w", err))
 	}
@@ -686,8 +673,8 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 	return pvc, nil
 }
 
-func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
-	cloneContainer, err := r.gitCloneContainer(inst, src)
+func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, definitionID string, pvcName string) (*batchv1.Job, error) {
+	cloneContainer, err := r.gitCloneContainer(inst)
 	if err != nil {
 		return nil, err
 	}
@@ -718,12 +705,12 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			},
 		},
 	}
-	if src.Spec.GitSecret != "" {
+	if inst.Spec.GitSecret != "" {
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
 			Name: "git-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName:  src.Spec.GitSecret,
+					SecretName:  inst.Spec.GitSecret,
 					DefaultMode: ptr.To[int32](0600),
 				},
 			},
@@ -739,7 +726,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 	return job, nil
 }
 
-func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
+func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, definitionID string, pvcName string) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.kanikoJobName(inst),
@@ -755,7 +742,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 							Args: []string{
 								fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
 								"--context=dir://workspace",
-								fmt.Sprintf("--destination=%s/%s:%s", src.Spec.ContainerRegistry, src.Name, inst.Parsed.Image),
+								fmt.Sprintf("--destination=%s/%s:%s", inst.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash),
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
@@ -775,7 +762,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 							Name: "docker-secret",
 							VolumeSource: corev1.VolumeSource{
 								Secret: &corev1.SecretVolumeSource{
-									SecretName: src.Spec.RegistryCredentials,
+									SecretName: inst.Spec.RegistryCredentials,
 									Items: []corev1.KeyToPath{
 										{
 											Key:  ".dockerconfigjson",
@@ -808,8 +795,8 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 	return job, nil
 }
 
-func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) (*corev1.Container, error) {
-	gitDomain, err := ParseGitUrl(src.Spec.GitURL)
+func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition) (*corev1.Container, error) {
+	gitDomain, err := ParseGitUrl(inst.Spec.GitURL)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +811,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 		Env: []corev1.EnvVar{
 			{
 				Name:  "REPO_URL",
-				Value: src.Spec.GitURL,
+				Value: inst.Spec.GitURL,
 			},
 			{
 				Name:  "REPO_DOMAIN",
@@ -842,7 +829,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 			},
 		},
 	}
-	if src.Spec.GitSecret != "" {
+	if inst.Spec.GitSecret != "" {
 		cloneContainer.VolumeMounts = append(cloneContainer.VolumeMounts, corev1.VolumeMount{
 			Name:      "git-secret",
 			MountPath: "/root/.ssh",

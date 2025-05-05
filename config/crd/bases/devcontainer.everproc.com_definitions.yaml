@@ -7972,18 +7972,26 @@ spec:
           spec:
             description: DefinitionSpec defines the desired state of Definition.
             properties:
+              containerRegistry:
+                type: string
               gitHashOrTag:
                 description: The git reference to checkout a specific hash or tag.
                 type: string
-              source:
-                description: The reference to the devcontainer source.
+              gitSecret:
+                description: The secret name that stores the SSH private key to download
+                  the private repository.
+                type: string
+              gitUrl:
+                description: The git url to download the repository.
+                type: string
+              registryCredentials:
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
                 type: string
             required:
             - gitHashOrTag
-            - source
+            - gitUrl
             type: object
           status:
             description: DefinitionStatus defines the observed state of Definition.
