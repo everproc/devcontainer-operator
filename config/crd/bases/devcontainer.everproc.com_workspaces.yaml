@@ -49,17 +49,29 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
-              definitionRef:
-                description: The link to the workspace definition
+              containerRegistry:
+                type: string
+              gitHashOrTag:
+                description: The git reference to checkout a specific hash or tag.
+                type: string
+              gitSecret:
+                description: The secret name that stores the SSH private key to download
+                  the private repository.
+                type: string
+              gitUrl:
+                description: The git url to download the repository.
                 type: string
               owner:
                 description: The owner of this workspace
+                type: string
+              registryCredentials:
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
                 type: string
             required:
-            - definitionRef
+            - gitHashOrTag
+            - gitUrl
             - owner
             type: object
           status:

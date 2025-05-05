@@ -41,25 +41,6 @@ type RunSpec struct {
 
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
-	// +kubebuilder:validation:Required
-	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string,description="The git url to download the repository."
-	// The git url to download the repository.
-	GitURL string `json:"gitUrl"`
-	// +kubebuilder:validation:Optional
-	// The secret name that stores the SSH private key to download the private repository.
-	GitSecret string `json:"gitSecret"`
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:printcolumn:JSONPath="spec.dockerRegistry",name=DockerRegistry,type=string
-	ContainerRegistry string `json:"containerRegistry"`
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
-	RegistryCredentials string `json:"registryCredentials"`
-	// +kubebuilder:validation:Required
-	// The git reference to checkout a specific hash or tag.
-	GitHashOrTag string `json:"gitHashOrTag"`
-	// +kubebuilder:validation:Optional
-	// The storage class that is used for PVC creation.
-	StorageClassName string `json:"storageClassName"`
 }
 
 // The parsed devcontainer json.

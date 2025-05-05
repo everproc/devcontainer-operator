@@ -6,7 +6,10 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workspace-sample
 spec:
-  # TODO(user): Add fields here
-  definitionRef: my-definition-sample
   owner: jan
   storageClassName: openebs-rwx
+  gitHashOrTag: dockerfile
+  gitUrl: "git@github.com:everproc/private-template-starter.git"
+  gitSecret: "github-deploy-key"
+  containerRegistry: "registry.autovia.io"
+  registryCredentials: docker
