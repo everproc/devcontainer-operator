@@ -18,12 +18,6 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Parsed')].reason
       name: ReadyState
       type: string
-    - jsonPath: .spec.gitHashOrTag
-      name: GitHashOrTag
-      type: string
-    - jsonPath: .spec.source
-      name: Source
-      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

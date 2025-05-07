@@ -33,6 +33,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -107,6 +108,21 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	if instance.Status.Conditions == nil || len(instance.Status.Conditions) == 0 {
+		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+			log.Error(err, "Failed to re-fetch Workspace")
+			return ctrl.Result{}, err
+		}
+		if instance.Spec.Owner == "" {
+			instance.Spec.Owner = instance.Name
+		}
+		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		if err = r.Status().Update(ctx, instance); err != nil {
+			log.Error(err, "Failed to update Workspace status")
+			return ctrl.Result{}, err
+		}
+	}
+
 	definitionID := definitionID(instance)
 	defList := &devcontainerv1alpha1.DefinitionList{}
 	err = r.List(ctx, defList, client.MatchingLabels{
@@ -129,11 +145,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			LabelWorkspaceMapKey:     instance.Name,
 		}
 		if err := ctrl.SetControllerReference(instance, &def, r.Scheme); err != nil {
-			log.Error(err, "Failed to set reference, definition owned by workspace: %s", instance.Name)
+			log.Error(err, "Failed to set reference, definition owned by workspace: %s", "workspace name", instance.Name)
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, &def); err != nil {
-			return ctrl.Result{}, fmt.Errorf("Failed to create definition resource: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to create definition resource: %w", err)
 		}
 		// give some time to process definition
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -143,27 +159,21 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		def = defList.Items[0]
 	}
 	if len(defList.Items) > 1 {
-		// TODO: clean up definitions
-		log.Error(err, "Two or more definitions exists for the workspace: %s", instance.Name)
+		log.Info("Cleanup duplicate definition for the workspace: %s", "workspace name", instance.Name)
+		err = r.Delete(ctx, &defList.Items[1])
+		if err != nil {
+			log.Error(err, "Failed to delete duplicate definition", "definition name", defList.Items[1].Name)
+			return ctrl.Result{}, err
+		}
 		def = defList.Items[0]
 	}
 
-	// def, err := r.getDefinition(ctx, instance)
-	// if err != nil {
-	// 	if apierrors.IsNotFound(err) {
-	// 		log.Error(err, "Definition not found, requeing", "definitionID", instance.Spec.DefinitionRef)
-	// 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	// 	}
-	// 	return ctrl.Result{}, err
-	// }
 	if !conditions.IsTrue(devcontainerv1alpha1.DefinitionCondTypeReady, def.Status.Conditions) {
 		// Definition is not ready yet
 		log.Info("Definition is not in a ready state yet", "definition name", def.Name)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	// TODO (juf): Assert this is non-empty
-	//definitionID := GetDefinitionIDLabel(def)
-
 	ownedDeployments := &appsv1.DeploymentList{}
 	// Let's hope this works.
 	// Why are we doing this?
@@ -191,7 +201,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create additional mount PVCs")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(ctx, instance, def.Parsed.PodTpl, &def, definitionID, pvc.Name, mountPVCs)
+		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &def, definitionID, pvc.Name, mountPVCs)
 		err = r.ensureResource(ctx, depl)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -239,6 +249,19 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Info("Workspace seems fully reconciled")
+	// The following implementation will update the status
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+		log.Error(err, "Failed to re-fetch Workspace")
+		return ctrl.Result{}, err
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady,
+		Status: metav1.ConditionTrue, Reason: "ReconcileFinished",
+		Message: fmt.Sprintf("Workspace for custom resource (%s) created successfully", instance.Name)})
+
+	if err := r.Status().Update(ctx, instance); err != nil {
+		log.Error(err, "Failed to update Workspace status")
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -556,7 +579,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 	return nil
 }
 
-func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
+func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
 		"app":          "devcontainer",
 		"definitionID": definitionID,
@@ -627,17 +650,6 @@ func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Obj
 	// Resource already exists, no action needed
 	return nil
 }
-
-// func (r *WorkspaceReconciler) getDefinition(ctx context.Context, inst *devcontainerv1alpha1.Workspace) (*devcontainerv1alpha1.Definition, error) {
-// 	log := log.FromContext(ctx)
-// 	def := &devcontainerv1alpha1.Definition{}
-// 	err := r.Get(ctx, types.NamespacedName{Namespace: inst.Namespace, Name: inst.Spec.DefinitionRef}, def)
-// 	if err != nil {
-// 		log.Error(err, "Error during retrieval")
-// 		return nil, err
-// 	}
-// 	return def, nil
-// }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {

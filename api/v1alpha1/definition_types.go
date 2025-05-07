@@ -94,8 +94,6 @@ type DefinitionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[?(@.type=='Parsed')].reason"
-// +kubebuilder:printcolumn:JSONPath=".spec.gitHashOrTag",name=GitHashOrTag,type=string
-// +kubebuilder:printcolumn:JSONPath=".spec.source",name=Source,type=string
 
 // Definition is the Schema for the definitions API.
 type Definition struct {

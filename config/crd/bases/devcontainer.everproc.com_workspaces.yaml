@@ -15,14 +15,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status['Ready'].status
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: ReadyState
       type: string
-    - jsonPath: .spec.owner
-      name: Owner
+    - jsonPath: .spec.gitUrl
+      name: GitUrl
       type: string
-    - jsonPath: .spec.definitionRef
-      name: DefinitionRef
+    - jsonPath: .spec.gitHashOrTag
+      name: GitHashOrTag
       type: string
     name: v1alpha1
     schema:
@@ -72,7 +72,6 @@ spec:
             required:
             - gitHashOrTag
             - gitUrl
-            - owner
             type: object
           status:
             description: WorkspaceStatus defines the observed state of Workspace.

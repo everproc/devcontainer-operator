@@ -531,10 +531,6 @@ func (r *DefinitionReconciler) kanikoJobName(inst *devcontainerv1alpha1.Definiti
 	return fmt.Sprintf("%s-docker-build", inst.Name)
 }
 
-func (r *DefinitionReconciler) clonePodName(inst *devcontainerv1alpha1.Definition) string {
-	return fmt.Sprintf("%s-git-clone", inst.Name)
-}
-
 func (r *DefinitionReconciler) ensureServiceAccount(ctx context.Context, namespace string) error {
 	sa := &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{

@@ -26,12 +26,12 @@ type WorkspaceSpec struct {
 	// DefinitionSpecTemplate DefinitionSpecTemplate `json:"definition_spec_template"`
 
 	// +kubebuilder:validation:Required
-	// The owner of this workspace
-	Owner string `json:"owner"`
-	// +kubebuilder:validation:Required
 	// +kubebuilder:printcolumn:JSONPath="spec.gitUrl",name=GitURL,type=string,description="The git url to download the repository."
 	// The git url to download the repository.
 	GitURL string `json:"gitUrl"`
+	// +kubebuilder:validation:Required
+	// The git reference to checkout a specific hash or tag.
+	GitHashOrTag string `json:"gitHashOrTag"`
 	// +kubebuilder:validation:Optional
 	// The secret name that stores the SSH private key to download the private repository.
 	GitSecret string `json:"gitSecret"`
@@ -41,12 +41,12 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
 	RegistryCredentials string `json:"registryCredentials"`
-	// +kubebuilder:validation:Required
-	// The git reference to checkout a specific hash or tag.
-	GitHashOrTag string `json:"gitHashOrTag"`
 	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
 	StorageClassName string `json:"storageClassName"`
+	// +kubebuilder:validation:Optional
+	// The owner of this workspace
+	Owner string `json:"owner"`
 }
 
 const (
@@ -54,7 +54,7 @@ const (
 	WorkspaceCondTypeReady = "Ready"
 )
 
-func initialConditionsWorkspace() []metav1.Condition {
+func InitialConditionsWorkspace() []metav1.Condition {
 	return []metav1.Condition{
 		{
 			Type:   WorkspaceCondTypeInUse,
@@ -76,9 +76,9 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status['Ready'].status"
-// +kubebuilder:printcolumn:JSONPath=".spec.owner",name=Owner,type=string
-// +kubebuilder:printcolumn:JSONPath=".spec.definitionRef",name=DefinitionRef,type=string
+// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[?(@.type=='Ready')].reason"
+// +kubebuilder:printcolumn:JSONPath=".spec.gitUrl",name=GitUrl,type=string
+// +kubebuilder:printcolumn:JSONPath=".spec.gitHashOrTag",name=GitHashOrTag,type=string
 
 // Workspace is the Schema for the workspaces API.
 type Workspace struct {
