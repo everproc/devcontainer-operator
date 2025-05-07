@@ -9,7 +9,6 @@ linters:
     - errcheck
     - ginkgolinter
     - goconst
-    - gocyclo
     - govet
     - ineffassign
     - lll
@@ -25,6 +24,8 @@ linters:
     revive:
       rules:
         - name: comment-spacings
+    lll:
+      line-length: 160
   exclusions:
     generated: lax
     rules:

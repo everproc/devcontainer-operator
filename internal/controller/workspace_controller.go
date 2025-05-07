@@ -108,7 +108,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	if instance.Status.Conditions == nil || len(instance.Status.Conditions) == 0 {
+	if len(instance.Status.Conditions) == 0 {
 		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 			log.Error(err, "Failed to re-fetch Workspace")
 			return ctrl.Result{}, err
@@ -202,6 +202,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &def, definitionID, pvc.Name, mountPVCs)
+		if err != nil {
+			log.Error(err, "Failed to create deployment yaml")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		err = r.ensureResource(ctx, depl)
 		if err != nil {
 			return ctrl.Result{}, err
