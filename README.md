@@ -23,6 +23,7 @@ metadata:
   name: template-starter
 spec:
   gitUrl: https://github.com/devcontainers/template-starter
+  gitHashOrTag: main
 ```
 
 Depending on your `devcontainer.json` specified IDE you can exec into the workspace container or connect your IDE over SSH or other protocols.
