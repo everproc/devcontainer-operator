@@ -173,7 +173,6 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Info("Definition is not in a ready state yet", "definition name", def.Name)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	// TODO (juf): Assert this is non-empty
 	ownedDeployments := &appsv1.DeploymentList{}
 	// Let's hope this works.
 	// Why are we doing this?
