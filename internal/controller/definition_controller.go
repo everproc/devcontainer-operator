@@ -293,7 +293,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 func patchDefinitionIDLabel(newDefinitionID string) client.Patch {
 	escapedLabelKey := strings.ReplaceAll(LabelDefinitionMapKey, "/", "~1")
-	op := []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/labels/%s", "value": %q}]`, escapedLabelKey, newDefinitionID))
+	op := fmt.Appendf([]byte{}, `[{"op": "add", "path": "/metadata/labels/%s", "value": %q}]`, escapedLabelKey, newDefinitionID)
 	return client.RawPatch(types.JSONPatchType, op)
 }
 
@@ -501,8 +501,9 @@ func (r *DefinitionReconciler) updateStatusMany(ctx context.Context, namespacedN
 
 func (r *DefinitionReconciler) updateStatus(ctx context.Context, namespacedName types.NamespacedName, instance *devcontainerv1alpha1.Definition, condition metav1.Condition) error {
 	log := log.FromContext(ctx)
+	var err error
 	for i := range 3 {
-		err := r.updateStatusMany(ctx, namespacedName, instance, []metav1.Condition{condition})
+		err = r.updateStatusMany(ctx, namespacedName, instance, []metav1.Condition{condition})
 		if err == nil {
 			return err
 		}
@@ -512,7 +513,7 @@ func (r *DefinitionReconciler) updateStatus(ctx context.Context, namespacedName 
 		}
 		return err
 	}
-	return nil
+	return err
 }
 
 func WorkspacePVCNameFromDefinitionName(name string) string {
@@ -671,7 +672,7 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 		},
 	}
 	if workspace.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = ptr.To[string](workspace.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To(workspace.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err

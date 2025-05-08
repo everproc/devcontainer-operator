@@ -386,7 +386,7 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To(inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
