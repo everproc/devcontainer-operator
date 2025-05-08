@@ -12,27 +12,21 @@ The repository that owns the .devcontainer will _always_ be mounted at `/workspa
 title: CRD Structure
 ---
 erDiagram
-    Source ||--o| Definition : has
     Workspace ||--|| Definition : has
     Workspace ||--|| Deployment : produces
 
-	Source {
-		GitURL string
-		GitSecret string
-        ContainerRegistry string
-        RegistryCredentials string
-	}
 	Definition {
-		GitHashOrTag string
-        Source string
-        StorageClassName string
 		RawSpec json
 		PodTemplateSpec *
 	}
 	Workspace {
-		DefinitionRef string
+    GitURL string
+		GitSecret string
+    ContainerRegistry string
+    RegistryCredentials string
+		GitHashOrTag string
 		Owner string
-        StorageClassName string
+    StorageClassName string
 	}
 ```
 
@@ -45,10 +39,6 @@ flowchart
 	PVC@{ shape: lin-rect, label: "Create (PVC)" }
 	Clone@{ label : Git Clone Pod (into PVC) (Container/1) }
 	Parse@{ label : Parse Devcontainer JSON (using same PVC) (Container/2) }
-
-
-
-	Source -->|from|Clone
 
 	subgraph Setup
 		Definition -->|Operator reads from config map and updates Definition|ConfigMap

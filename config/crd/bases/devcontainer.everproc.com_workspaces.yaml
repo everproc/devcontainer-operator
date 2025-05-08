@@ -15,14 +15,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status['Ready'].status
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: ReadyState
       type: string
-    - jsonPath: .spec.owner
-      name: Owner
+    - jsonPath: .spec.gitUrl
+      name: GitUrl
       type: string
-    - jsonPath: .spec.definitionRef
-      name: DefinitionRef
+    - jsonPath: .spec.gitHashOrTag
+      name: GitHashOrTag
       type: string
     name: v1alpha1
     schema:
@@ -49,18 +49,29 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
-              definitionRef:
-                description: The link to the workspace definition
+              containerRegistry:
+                type: string
+              gitHashOrTag:
+                description: The git reference to checkout a specific hash or tag.
+                type: string
+              gitSecret:
+                description: The secret name that stores the SSH private key to download
+                  the private repository.
+                type: string
+              gitUrl:
+                description: The git url to download the repository.
                 type: string
               owner:
                 description: The owner of this workspace
+                type: string
+              registryCredentials:
                 type: string
               storageClassName:
                 description: The storage class that is used for PVC creation.
                 type: string
             required:
-            - definitionRef
-            - owner
+            - gitHashOrTag
+            - gitUrl
             type: object
           status:
             description: WorkspaceStatus defines the observed state of Workspace.

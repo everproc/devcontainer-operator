@@ -18,11 +18,9 @@ package controller
 
 import (
 	"context"
-	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -51,6 +49,7 @@ const UtilRoleBindingName = UtilRoleName
 const UtilServiceAccountName = UtilRoleName
 
 var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
+var LabelWorkspaceMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/workspaceName"
 
 func init() {
 	res := validation.IsQualifiedName(LabelDefinitionMapKey)
@@ -125,32 +124,32 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	src := &devcontainerv1alpha1.Source{}
-	err = r.Get(ctx, types.NamespacedName{Name: instance.Spec.Source, Namespace: instance.Namespace}, src)
+	// definitionID := definitionID(instance)
+	// previousDefinitionID := GetDefinitionIDLabel(instance)
+	// if previousDefinitionID == "" {
+	// 	log.Info("Definition does not have a git hash based ID yet", "definitionID", definitionID)
+	// } else {
+	// 	if previousDefinitionID != definitionID {
+	// 		log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
+	// 	} else {
+	// 		log.Info("Definition ID did not change")
+	// 	}
+	// }
+	//
+	definitionID := GetDefinitionIDLabel(instance)
+	workspace := &devcontainerv1alpha1.Workspace{}
+	err = r.Get(ctx, types.NamespacedName{Name: GetWorkspaceNameLabel(instance), Namespace: instance.Namespace}, workspace)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if err := r.updateStatus(ctx, req.NamespacedName, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeRemoteCloned, Status: metav1.ConditionFalse, Reason: "MissingSource", Message: fmt.Sprintf("Source %q is missing", instance.Spec.Source)}); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Try again
-			return ctrl.Result{Requeue: true}, nil
+			log.Info("Not found, probably deleted")
+			// return no error, stops the reconciliation for this object
+			return ctrl.Result{}, nil
 		}
+		log.Error(err, "Failed to get workspace")
 		return ctrl.Result{}, err
 	}
 
-	definitionID := definitionID(instance, src)
-	previousDefinitionID := GetDefinitionIDLabel(instance)
-	if previousDefinitionID == "" {
-		log.Info("Definition does not have a git hash based ID yet", "definitionID", definitionID)
-	} else {
-		if previousDefinitionID != definitionID {
-			log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
-		} else {
-			log.Info("Definition ID did not change")
-		}
-	}
-
-	pvcRes, err := r.ensurePvc(ctx, instance, definitionID)
+	pvcRes, err := r.ensurePvc(ctx, instance, workspace, definitionID)
 	if err != nil {
 		return pvcRes, err
 	} else {
@@ -175,7 +174,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
 
-	podRes, err := r.ensureSetupPod(ctx, instance, src, definitionID)
+	podRes, err := r.ensureSetupPod(ctx, instance, workspace, definitionID)
 	if err != nil {
 		return podRes, err
 	} else {
@@ -260,7 +259,7 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// check if Dockerfile reference exists
 	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
-		jobRes, err := r.ensureKanikoJob(ctx, instance, src, definitionID)
+		jobRes, err := r.ensureKanikoJob(ctx, instance, workspace, definitionID)
 		if err != nil {
 			return jobRes, err
 		} else {
@@ -294,18 +293,18 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 func patchDefinitionIDLabel(newDefinitionID string) client.Patch {
 	escapedLabelKey := strings.ReplaceAll(LabelDefinitionMapKey, "/", "~1")
-	op := []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/labels/%s", "value": %q}]`, escapedLabelKey, newDefinitionID))
+	op := fmt.Appendf([]byte{}, `[{"op": "add", "path": "/metadata/labels/%s", "value": %q}]`, escapedLabelKey, newDefinitionID)
 	return client.RawPatch(types.JSONPatchType, op)
 }
 
-func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionUnknown, Reason: "ProvisioningPodParse", Message: "Provisioning Parse Pod"}); err != nil {
 			log.Info("Failed to update status during pod setup")
 			return ctrl.Result{}, err
 		}
-		pod, err := r.setupPod(instance, src, definitionID, WorkspacePVCName(instance))
+		pod, err := r.setupPod(instance, workspace, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
@@ -359,14 +358,14 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 	return ctrl.Result{}, nil
 }
 
-func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
 		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
-		job, err := r.kanikoJob(instance, src, definitionID, WorkspacePVCName(instance))
+		job, err := r.kanikoJob(instance, workspace, definitionID, WorkspacePVCName(instance))
 		if err != nil {
 			log.Error(err, "Failed to construct parse Kaniko pod spec")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
@@ -420,7 +419,7 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 	return ctrl.Result{}, nil
 }
 
-func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devcontainerv1alpha1.Definition, definitionID string) (ctrl.Result, error) {
+func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	// Let's hope this works.
 	// Why are we doing this?
@@ -432,7 +431,7 @@ func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devconta
 	// if size equals 1, we need to check if the definitionID label matches, if it does, everything is fine, else schedule the PVC and delete the old PVC
 	// if size is greater than 1 we need to clean up
 	createFn := func() (ctrl.Result, error) {
-		pvc, err := r.pvcForGitRepo(instance)
+		pvc, err := r.pvcForGitRepo(instance, workspace)
 		if err != nil {
 			log.Error(err, "Failed to construct PVC spec")
 			return ctrl.Result{}, err
@@ -478,16 +477,6 @@ func (r *DefinitionReconciler) ensurePvc(ctx context.Context, instance *devconta
 	return ctrl.Result{}, nil
 }
 
-func definitionID(instance *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) string {
-	h := sha1.New()
-	_, err := io.WriteString(h, instance.Name+instance.Spec.GitHashOrTag+src.Spec.GitURL)
-	if err != nil {
-		panic(fmt.Errorf("could not generate definitionID: %w", err))
-	}
-	out := h.Sum(nil)
-	return fmt.Sprintf("%x", out)
-}
-
 func (r *DefinitionReconciler) updateStatusMany(ctx context.Context, namespacedName types.NamespacedName, instance *devcontainerv1alpha1.Definition, conditions []metav1.Condition) error {
 	log := log.FromContext(ctx)
 	if err := r.Get(ctx, namespacedName, instance); err != nil {
@@ -512,8 +501,9 @@ func (r *DefinitionReconciler) updateStatusMany(ctx context.Context, namespacedN
 
 func (r *DefinitionReconciler) updateStatus(ctx context.Context, namespacedName types.NamespacedName, instance *devcontainerv1alpha1.Definition, condition metav1.Condition) error {
 	log := log.FromContext(ctx)
+	var err error
 	for i := range 3 {
-		err := r.updateStatusMany(ctx, namespacedName, instance, []metav1.Condition{condition})
+		err = r.updateStatusMany(ctx, namespacedName, instance, []metav1.Condition{condition})
 		if err == nil {
 			return err
 		}
@@ -523,7 +513,7 @@ func (r *DefinitionReconciler) updateStatus(ctx context.Context, namespacedName 
 		}
 		return err
 	}
-	return nil
+	return err
 }
 
 func WorkspacePVCNameFromDefinitionName(name string) string {
@@ -540,10 +530,6 @@ func (r *DefinitionReconciler) setupJobName(inst *devcontainerv1alpha1.Definitio
 
 func (r *DefinitionReconciler) kanikoJobName(inst *devcontainerv1alpha1.Definition) string {
 	return fmt.Sprintf("%s-docker-build", inst.Name)
-}
-
-func (r *DefinitionReconciler) clonePodName(inst *devcontainerv1alpha1.Definition) string {
-	return fmt.Sprintf("%s-git-clone", inst.Name)
 }
 
 func (r *DefinitionReconciler) ensureServiceAccount(ctx context.Context, namespace string) error {
@@ -659,7 +645,15 @@ func GetDefinitionIDLabel(resource client.Object) string {
 	return m[LabelDefinitionMapKey]
 }
 
-func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definition) (*corev1.PersistentVolumeClaim, error) {
+func GetWorkspaceNameLabel(resource client.Object) string {
+	m := resource.GetLabels()
+	if m == nil {
+		m = make(map[string]string)
+	}
+	return m[LabelWorkspaceMapKey]
+}
+
+func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace) (*corev1.PersistentVolumeClaim, error) {
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      WorkspacePVCName(inst),
@@ -677,8 +671,8 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 			},
 		},
 	}
-	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
+	if workspace.Spec.StorageClassName != "" {
+		pvc.Spec.StorageClassName = ptr.To(workspace.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -686,8 +680,8 @@ func (r *DefinitionReconciler) pvcForGitRepo(inst *devcontainerv1alpha1.Definiti
 	return pvc, nil
 }
 
-func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
-	cloneContainer, err := r.gitCloneContainer(inst, src)
+func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string, pvcName string) (*batchv1.Job, error) {
+	cloneContainer, err := r.gitCloneContainer(inst, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -718,12 +712,12 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 			},
 		},
 	}
-	if src.Spec.GitSecret != "" {
+	if workspace.Spec.GitSecret != "" {
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
 			Name: "git-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName:  src.Spec.GitSecret,
+					SecretName:  workspace.Spec.GitSecret,
 					DefaultMode: ptr.To[int32](0600),
 				},
 			},
@@ -739,7 +733,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, s
 	return job, nil
 }
 
-func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source, definitionID string, pvcName string) (*batchv1.Job, error) {
+func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string, pvcName string) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.kanikoJobName(inst),
@@ -755,7 +749,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 							Args: []string{
 								fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
 								"--context=dir://workspace",
-								fmt.Sprintf("--destination=%s/%s:%s", src.Spec.ContainerRegistry, src.Name, inst.Parsed.Image),
+								fmt.Sprintf("--destination=%s/%s:%s", workspace.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash),
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
@@ -775,7 +769,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 							Name: "docker-secret",
 							VolumeSource: corev1.VolumeSource{
 								Secret: &corev1.SecretVolumeSource{
-									SecretName: src.Spec.RegistryCredentials,
+									SecretName: workspace.Spec.RegistryCredentials,
 									Items: []corev1.KeyToPath{
 										{
 											Key:  ".dockerconfigjson",
@@ -808,8 +802,8 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 	return job, nil
 }
 
-func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, src *devcontainerv1alpha1.Source) (*corev1.Container, error) {
-	gitDomain, err := ParseGitUrl(src.Spec.GitURL)
+func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace) (*corev1.Container, error) {
+	gitDomain, err := ParseGitUrl(workspace.Spec.GitURL)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +818,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 		Env: []corev1.EnvVar{
 			{
 				Name:  "REPO_URL",
-				Value: src.Spec.GitURL,
+				Value: workspace.Spec.GitURL,
 			},
 			{
 				Name:  "REPO_DOMAIN",
@@ -832,7 +826,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 			},
 			{
 				Name:  "GIT_HASH_OR_BRANCH",
-				Value: inst.Spec.GitHashOrTag,
+				Value: workspace.Spec.GitHashOrTag,
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
@@ -842,7 +836,7 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 			},
 		},
 	}
-	if src.Spec.GitSecret != "" {
+	if workspace.Spec.GitSecret != "" {
 		cloneContainer.VolumeMounts = append(cloneContainer.VolumeMounts, corev1.VolumeMount{
 			Name:      "git-secret",
 			MountPath: "/root/.ssh",

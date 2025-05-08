@@ -19,10 +19,12 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,10 +33,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -105,31 +107,72 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 	}
-	def, err := r.getDefinition(ctx, instance)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Error(err, "Definition not found, requeing", "definitionID", instance.Spec.DefinitionRef)
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+
+	if len(instance.Status.Conditions) == 0 {
+		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+			log.Error(err, "Failed to re-fetch Workspace")
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
+		if instance.Spec.Owner == "" {
+			instance.Spec.Owner = instance.Name
+		}
+		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		if err = r.Status().Update(ctx, instance); err != nil {
+			log.Error(err, "Failed to update Workspace status")
+			return ctrl.Result{}, err
+		}
 	}
-	if !conditions.IsTrue(devcontainerv1alpha1.DefinitionCondTypeReady, def.Status.Conditions) {
-		// Definition is not ready yet
-		log.Info("Definition is not in a ready state yet", "definitionID", instance.Spec.DefinitionRef)
+
+	definitionID := definitionID(instance)
+	defList := &devcontainerv1alpha1.DefinitionList{}
+	err = r.List(ctx, defList, client.MatchingLabels{
+		"app.kubernetes.io/name": "devcontainer",
+		LabelDefinitionMapKey:    definitionID,
+		LabelWorkspaceMapKey:     instance.Name,
+	})
+	if err != nil {
+		log.Error(err, "Failed to list owned definitions")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	var def devcontainerv1alpha1.Definition
+	if len(defList.Items) == 0 {
+		// create definition cr
+		def.Name = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", instance.Name))
+		def.Namespace = instance.Namespace
+		def.Labels = map[string]string{
+			"app.kubernetes.io/name": "devcontainer",
+			LabelDefinitionMapKey:    definitionID,
+			LabelWorkspaceMapKey:     instance.Name,
+		}
+		if err := ctrl.SetControllerReference(instance, &def, r.Scheme); err != nil {
+			log.Error(err, "Failed to set reference, definition owned by workspace: %s", "workspace name", instance.Name)
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, &def); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to create definition resource: %w", err)
+		}
+		// give some time to process definition
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	src := &devcontainerv1alpha1.Source{}
-	err = r.Get(ctx, types.NamespacedName{Namespace: def.Namespace, Name: def.Spec.Source}, src)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Error(err, "Source of Definition not found, requeing", "definitionID", instance.Spec.DefinitionRef)
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		}
-		return ctrl.Result{}, err
+	if len(defList.Items) == 1 {
+		// use existing definition
+		def = defList.Items[0]
 	}
-	// TODO (juf): Assert this is non-empty
-	definitionID := GetDefinitionIDLabel(def)
+	if len(defList.Items) > 1 {
+		log.Info("Cleanup duplicate definition for the workspace: %s", "workspace name", instance.Name)
+		err = r.Delete(ctx, &defList.Items[1])
+		if err != nil {
+			log.Error(err, "Failed to delete duplicate definition", "definition name", defList.Items[1].Name)
+			return ctrl.Result{}, err
+		}
+		def = defList.Items[0]
+	}
 
+	if !conditions.IsTrue(devcontainerv1alpha1.DefinitionCondTypeReady, def.Status.Conditions) {
+		// Definition is not ready yet
+		log.Info("Definition is not in a ready state yet", "definition name", def.Name)
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
 	ownedDeployments := &appsv1.DeploymentList{}
 	// Let's hope this works.
 	// Why are we doing this?
@@ -152,12 +195,16 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create workspace PVC")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		mountPVCs, err := r.ensureMountPVCs(ctx, def, instance)
+		mountPVCs, err := r.ensureMountPVCs(ctx, &def, instance)
 		if err != nil {
 			log.Error(err, "Failed to create additional mount PVCs")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(ctx, instance, def.Parsed.PodTpl, &src.Spec, def, definitionID, pvc.Name, mountPVCs)
+		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &def, definitionID, pvc.Name, mountPVCs)
+		if err != nil {
+			log.Error(err, "Failed to create deployment yaml")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		err = r.ensureResource(ctx, depl)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -188,7 +235,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if !ok || v == "false" {
 			// Currently "false" is an impossible value
 			log.Info("Executing PostCreationCommands")
-			if err := r.parseAndExecPostCreationCommands(ctx, instance, def); err != nil {
+			if err := r.parseAndExecPostCreationCommands(ctx, instance, &def); err != nil {
 				return ctrl.Result{}, err
 			}
 			currentDeployment.Annotations[WorkspaceDeploymentExecutedPostCreateAnnotationKey] = "true"
@@ -205,7 +252,30 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Info("Workspace seems fully reconciled")
+	// The following implementation will update the status
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+		log.Error(err, "Failed to re-fetch Workspace")
+		return ctrl.Result{}, err
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady,
+		Status: metav1.ConditionTrue, Reason: "ReconcileFinished",
+		Message: fmt.Sprintf("Workspace for custom resource (%s) created successfully", instance.Name)})
+
+	if err := r.Status().Update(ctx, instance); err != nil {
+		log.Error(err, "Failed to update Workspace status")
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
+}
+
+func definitionID(workspace *devcontainerv1alpha1.Workspace) string {
+	h := sha1.New()
+	_, err := io.WriteString(h, workspace.Name+workspace.Spec.GitHashOrTag+workspace.Spec.GitURL)
+	if err != nil {
+		panic(fmt.Errorf("could not generate definitionID: %w", err))
+	}
+	out := h.Sum(nil)
+	return fmt.Sprintf("%x", out)
 }
 
 func (r *WorkspaceReconciler) ensureMountPVCs(ctx context.Context, def *devcontainerv1alpha1.Definition, inst *devcontainerv1alpha1.Workspace) ([]*corev1.PersistentVolumeClaim, error) {
@@ -285,11 +355,14 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 		log.Error(err, "Failed to query for existing PVCs")
 		return nil, err
 	}
-	if len(pvcList.Items) > 0 {
-		log.Info("PVC seems to already exist, no new PVC will be created", "workspace", inst.Name)
+	if len(pvcList.Items) == 1 {
+		log.Info("PVC seems to already exist, no new PVC will be created", "builder", inst.Name)
+		return &pvcList.Items[0], nil
+	} else if len(pvcList.Items) == 0 {
+		log.Info("Did not found a matching PVC, let's schedule it", "builder", inst.Name)
+	} else if len(pvcList.Items) > 1 {
+		log.Info("Two or more PVCs exists with the same definitionID", "builder", inst.Name)
 		return nil, nil
-	} else {
-		log.Info("Did not found a matching PVC, let's schedule it", "workspace", inst.Name)
 	}
 
 	pvcName := names.SimpleNameGenerator.GenerateName("wkspce-")
@@ -312,7 +385,7 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 		},
 	}
 	if inst.Spec.StorageClassName != "" {
-		pvc.Spec.StorageClassName = ptr.To[string](inst.Spec.StorageClassName)
+		pvc.Spec.StorageClassName = ptr.To(inst.Spec.StorageClassName)
 	}
 	if err := ctrl.SetControllerReference(inst, pvc, r.Scheme); err != nil {
 		return nil, err
@@ -324,13 +397,13 @@ func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devc
 	return pvc, nil
 }
 
-func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec) {
-	if spec.GitSecret != "" {
+func (r *WorkspaceReconciler) injectSecret(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec) {
+	if inst.Spec.GitSecret != "" {
 		tpl.Spec.Volumes = append(tpl.Spec.Volumes, corev1.Volume{
 			Name: "git-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName:  spec.GitSecret,
+					SecretName:  inst.Spec.GitSecret,
 					DefaultMode: ptr.To[int32](0600),
 				},
 			},
@@ -343,8 +416,8 @@ func (r *WorkspaceReconciler) injectSecret(spec *devcontainerv1alpha1.SourceSpec
 	}
 }
 
-func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, spec *devcontainerv1alpha1.SourceSpec, tpl *corev1.PodTemplateSpec, gitHash string) {
-	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", spec.ContainerRegistry, def.Spec.Source, gitHash)
+func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec) {
+	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", inst.Spec.ContainerRegistry, def.Name, def.Parsed.GitHash)
 }
 
 func (r *WorkspaceReconciler) injectWorkspace(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {
@@ -509,7 +582,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 	return nil
 }
 
-func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, spec *devcontainerv1alpha1.SourceSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
+func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
 		"app":          "devcontainer",
 		"definitionID": definitionID,
@@ -520,13 +593,13 @@ func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcon
 	// TODO(juf): Debattable
 	tpl.Labels = maps.UnionInPlace(tpl.Labels, selectorLabels)
 
-	gitDomain, err := ParseGitUrl(spec.GitURL)
+	gitDomain, err := ParseGitUrl(inst.Spec.GitURL)
 	if err != nil {
 		return nil, err
 	}
 
-	r.injectWorkspace(pvcName, spec.GitURL, gitDomain, def.Spec.GitHashOrTag, tpl)
-	r.injectSecret(spec, tpl)
+	r.injectWorkspace(pvcName, inst.Spec.GitURL, gitDomain, inst.Spec.GitHashOrTag, tpl)
+	r.injectSecret(inst, tpl)
 
 	data := parsing.DevContainerSpec{}
 	err = json.Unmarshal([]byte(def.Parsed.RawDefinition), &data)
@@ -537,7 +610,7 @@ func (r *WorkspaceReconciler) createDeployment(ctx context.Context, inst *devcon
 		r.injectMounts(tpl, mountPVCs)
 	}
 	if data.Build.Dockerfile != "" {
-		r.injectImage(def, spec, tpl, def.Parsed.GitHash)
+		r.injectImage(def, inst, tpl)
 	}
 	injectContainerOverwrites(tpl)
 	depl := &appsv1.Deployment{
@@ -579,17 +652,6 @@ func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Obj
 
 	// Resource already exists, no action needed
 	return nil
-}
-
-func (r *WorkspaceReconciler) getDefinition(ctx context.Context, inst *devcontainerv1alpha1.Workspace) (*devcontainerv1alpha1.Definition, error) {
-	log := log.FromContext(ctx)
-	def := &devcontainerv1alpha1.Definition{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: inst.Namespace, Name: inst.Spec.DefinitionRef}, def)
-	if err != nil {
-		log.Error(err, "Error during retrieval")
-		return nil, err
-	}
-	return def, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

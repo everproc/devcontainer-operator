@@ -18,12 +18,6 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Parsed')].reason
       name: ReadyState
       type: string
-    - jsonPath: .spec.gitHashOrTag
-      name: GitHashOrTag
-      type: string
-    - jsonPath: .spec.source
-      name: Source
-      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -7971,19 +7965,6 @@ spec:
             type: object
           spec:
             description: DefinitionSpec defines the desired state of Definition.
-            properties:
-              gitHashOrTag:
-                description: The git reference to checkout a specific hash or tag.
-                type: string
-              source:
-                description: The reference to the devcontainer source.
-                type: string
-              storageClassName:
-                description: The storage class that is used for PVC creation.
-                type: string
-            required:
-            - gitHashOrTag
-            - source
             type: object
           status:
             description: DefinitionStatus defines the observed state of Definition.

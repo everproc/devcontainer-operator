@@ -41,15 +41,6 @@ type RunSpec struct {
 
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
-	// +kubebuilder:validation:Required
-	// The reference to the devcontainer source.
-	Source string `json:"source"`
-	// +kubebuilder:validation:Required
-	// The git reference to checkout a specific hash or tag.
-	GitHashOrTag string `json:"gitHashOrTag"`
-	// +kubebuilder:validation:Optional
-	// The storage class that is used for PVC creation.
-	StorageClassName string `json:"storageClassName"`
 }
 
 // The parsed devcontainer json.
@@ -103,8 +94,6 @@ type DefinitionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[?(@.type=='Parsed')].reason"
-// +kubebuilder:printcolumn:JSONPath=".spec.gitHashOrTag",name=GitHashOrTag,type=string
-// +kubebuilder:printcolumn:JSONPath=".spec.source",name=Source,type=string
 
 // Definition is the Schema for the definitions API.
 type Definition struct {

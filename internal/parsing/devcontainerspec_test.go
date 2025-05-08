@@ -89,7 +89,7 @@ func TestParseMounts(t *testing.T) {
 	expected := parsing.Mount{
 		Source:   "dind-var-lib-docker",
 		Target:   "/var/lib/docker",
-		Type:     "volume",
+		Type:     "bind",
 		Readonly: true,
 	}
 	err := json.Unmarshal([]byte(f), &result)

@@ -6,6 +6,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: jupyter-workspace-sample
 spec:
-  # TODO(user): Add fields here
-  definitionRef: jupyter-sample
   owner: julius
+  gitHashOrTag: master
+  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
