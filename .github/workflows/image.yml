@@ -19,7 +19,7 @@ jobs:
         include:
         - name: parserapp
           file: Dockerfile.parserapp
-        - name: gitclone
+        - name: git-clone
           file: Dockerfile.gitclone
         - name: devcontainer-operator
           file: Dockerfile
