@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/everproc/devcontainer-operator:0.0.3
+IMG ?= ghcr.io/everproc/devcontainer-operator:0.0.7
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 
@@ -159,16 +159,16 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 build-parser:
-	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:0.0.1
+	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:0.0.7
 
 build-git-clone:
-	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:0.0.1
+	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:0.0.7
 
 build-utilities: build-parser build-git-clone
 
 build-and-push-utilities: build-utilities
-	kind load docker-image parserapp:0.0.1 parserapp:0.0.1
-	kind load docker-image git-clone:0.0.1 git-clone:0.0.1
+	kind load docker-image parserapp:0.0.7 parserapp:0.0.7
+	kind load docker-image git-clone:0.0.7 git-clone:0.0.7
 
 ##@ Dependencies
 
