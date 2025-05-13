@@ -8550,7 +8550,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: ghcr.io/everproc/devcontainer-operator:0.0.3
+        image: ghcr.io/everproc/devcontainer-operator:0.0.7
         livenessProbe:
           httpGet:
             path: /healthz

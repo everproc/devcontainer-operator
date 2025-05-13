@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/everproc/devcontainer-operator
-  newTag: 0.0.3
+  newTag: 0.0.7
