@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 type Cmd struct {
@@ -37,6 +39,120 @@ func (cmd Cmd) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("neither string nor array of cmd are defined, cannot marshal json")
 }
 
+type FeatureRequest struct {
+	// TODO(juf): implement
+	// Requires custom de/serialize for nicer handling
+	Options map[string]any
+	Ref     name.Reference
+}
+
+type FeatureList struct {
+	Features []FeatureRequest
+}
+
+func ParseDependency(s string) (*FeatureRequest, error) {
+	ref, err := name.ParseReference(s)
+	if err != nil {
+		return nil, err
+	}
+	d := &FeatureRequest{
+		Options: make(map[string]any),
+		Ref:     ref,
+	}
+	return d, nil
+
+}
+
+func (d *FeatureList) UnmarshalJSON(b []byte) error {
+	raw := map[string]map[string]any{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for k, v := range raw {
+		dep, err := ParseDependency(k)
+		if err != nil {
+			return err
+		}
+		dep.Options = v
+		d.Features = append(d.Features, *dep)
+	}
+	return nil
+}
+
+type FeatureSpecOption struct {
+	ID          string
+	Type        string
+	Description string
+	Proposals   []string
+	Default     string
+}
+
+type FeatureSpecOptionList struct {
+	Options map[string]FeatureSpecOption
+}
+
+func (o *FeatureSpecOptionList) UnmarshalJSON(b []byte) error {
+	raw := map[string]map[string]any{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for k, v := range raw {
+		var proposals []string = nil
+		if p, ok := v["proposals"]; ok {
+			for _, pv := range p.([]interface{}) {
+				proposals = append(proposals, fmt.Sprintf("%s", pv))
+			}
+		}
+		defaultVal := ""
+		switch v["default"].(type) {
+		case string:
+			defaultVal = v["default"].(string)
+		default:
+			// TODO(juf): fix this
+			b, err := json.Marshal(v["default"])
+			if err != nil {
+				panic(err)
+			}
+			defaultVal = string(b)
+		}
+		opt := FeatureSpecOption{
+			ID:          k,
+			Type:        v["type"].(string),
+			Description: v["description"].(string),
+			Proposals:   proposals,
+			Default:     defaultVal,
+		}
+		if o.Options == nil {
+			o.Options = make(map[string]FeatureSpecOption)
+		}
+		o.Options[k] = opt
+	}
+	return nil
+}
+
+type FeatureSpec struct {
+	ID               string                `json:"id"`      // Required
+	Version          string                `json:"version"` // Required
+	Name             string                `json:"name"`    // Required
+	Description      string                `json:"description,omitempty"`
+	DocumentationURL string                `json:"documentationURL,omitempty"`
+	LicenseURL       string                `json:"licenseURL,omitempty"`
+	Keywords         []string              `json:"keywords,omitempty"`
+	Options          FeatureSpecOptionList `json:"options,omitempty"`
+	ContainerEnv     map[string]any        `json:"containerEnv,omitempty"`
+	Privileged       bool                  `json:"privileged,omitempty"`
+	Init             bool                  `json:"init,omitempty"`
+	CapAdd           []string              `json:"capAdd,omitempty"`
+	SecurityOpt      []string              `json:"securityOpt,omitempty"`
+	Entrypoint       string                `json:"entrypoint,omitempty"`
+	Customizations   map[string]any        `json:"customizations,omitempty"`
+	DependsOn        FeatureList           `json:"dependsOn,omitempty"`
+	InstallsAfter    []string              `json:"installsAfter,omitempty"`
+	LegacyIDs        []string              `json:"legacyIds,omitempty"`
+	Deprecated       bool                  `json:"deprecated,omitempty"`
+	Mounts           []*Mount              `json:"mounts,omitempty"`
+}
+
 // https://containers.dev/implementors/json_reference/
 type DevContainerSpec struct {
 	// A name for the dev container displayed in the UI.
@@ -55,12 +171,18 @@ type DevContainerSpec struct {
 		// Display name for the port in the ports view.
 		Label string `json:"label"`
 	} `json:"portsAttributes"`
+	// TODO(juf): Add comments so it looks like AI generated code
+	RemoteUser string `json:"remoteUser"`
+	// TODO(juf): Add comments so it looks like AI generated code
+	ContainerUser string `json:"containerUser"`
 	// This command is the last of three that finalizes container setup when a dev container is created.
 	PostCreateCommand *Cmd `json:"postCreateCommand"`
 	// A command to run each time the container is successfully started.
 	PostStartCommand *Cmd `json:"postStartCommand"`
 	// Add additional mounts to a container.
 	Mounts []*Mount `json:"mounts,omitempty"`
+	// Augment devcontainer with a list of features
+	Features FeatureList `json:"features"`
 }
 
 // https://docs.docker.com/engine/storage/bind-mounts/#options-for---mount
@@ -82,12 +204,12 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" || string(data) == `""` {
 		return nil
 	}
-	var j interface{}
+	var j any
 	if err := json.Unmarshal(data, &j); err != nil {
 		return err
 	}
 
-	if r, ok := j.(map[string]interface{}); ok {
+	if r, ok := j.(map[string]any); ok {
 		if t, ok := r["type"].(string); ok {
 			m.Type = t
 		}

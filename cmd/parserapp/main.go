@@ -62,7 +62,9 @@ func main() {
 		return
 	}
 	file := os.Args[1]
+	// Debug
 	logDir(ctx, ".")
+	// Debug
 	logDir(ctx, path.Dir("/workspace"))
 	for {
 		_, err := os.Stat("/workspace/.tmp/git_status/clone_done")
@@ -91,6 +93,7 @@ func main() {
 		return
 	}
 
+	// Debug
 	logDir(ctx, path.Dir(file))
 	reader, err := os.Open(file)
 	if err != nil {
