@@ -115,8 +115,6 @@ func (t *Node[T]) HasCycle() bool {
 	return false
 }
 
-var relevantFiles = []string{"devcontainer-feature.json", "install.sh"}
-
 type Feature struct {
 	// TODO(juf): Cache Path or something
 	Spec       parsing.FeatureSpec
@@ -141,7 +139,11 @@ func (f *Feature) ID() string {
 		h := sha256.New()
 		for _, k := range s {
 			h.Write([]byte(k))
-			fmt.Fprintf(h, "%v", f.Config.Options[k])
+			_, err := fmt.Fprintf(h, "%v", f.Config.Options[k])
+			if err != nil {
+				// Let's panic for now.
+				panic(err)
+			}
 		}
 		h.Write([]byte(f.Digest))
 		return fmt.Sprintf("%x", h.Sum(nil))
@@ -236,8 +238,6 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 		panic(err)
 	}
 
-	//fmt.Println("Layers:")
-
 	ft := FromParsed(&feature)
 	// TODO(juf): Requires validation, whether this is actually the correct digest.
 	// This digest should help with this: https://containers.dev/implementors/features/#definition-feature-equality
@@ -260,12 +260,12 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 			panic(err)
 		}
 		func() {
-			defer r.Close()
+			defer MustClose(r)
 			tr := tar.NewReader(r)
 			for {
 				header, err := tr.Next()
 				if err != nil {
-					if errors.Is(io.EOF, err) {
+					if errors.Is(err, io.EOF) {
 						break
 					}
 					panic(err)
@@ -275,25 +275,32 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 				}
 				p := path.Join(ftCachePath, header.Name)
 				if header.FileInfo().IsDir() {
-					if _, err := os.Stat(p); err != nil {
-						if err := os.Mkdir(p, 0700); err != nil {
-							panic(err)
-						}
+					if err := createDirIfNotExists(p); err != nil {
+						panic(err)
 					}
 					continue
 				}
 				contents, err := io.ReadAll(tr)
+				if err != nil {
+					panic(err)
+				}
 				f, err := os.OpenFile(p, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0700)
 				if err != nil {
 					panic(err)
 				}
+
 				_, err = f.Write(contents)
 				if err != nil {
 					panic(err)
 				}
+				MustClose(f)
 
 				name := header.FileInfo().Name()
-				if name == DESCRIPTOR_NAME {
+				// TODO(juf): This is medium obsolete due to caching _all_ the files, because
+				// we need them for the OCI build context anyway.
+				// Except for the Spec
+				switch name {
+				case DESCRIPTOR_NAME:
 					ft.Descriptor = contents
 					val, err := hujson.Parse(ft.Descriptor)
 					if err != nil {
@@ -307,7 +314,7 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 						panic(err)
 					}
 					ft.Spec = spec
-				} else if name == INSTALLER_NAME {
+				case INSTALLER_NAME:
 					ft.Installer = contents
 				}
 			}

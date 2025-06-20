@@ -11,6 +11,7 @@ import (
 
 	"everproc.com/devcontainer/internal/parsing"
 	"everproc.com/devcontainer/internal/testing_util"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_parse_and_build_docker_image(t *testing.T) {
@@ -25,46 +26,27 @@ func Test_parse_and_build_docker_image(t *testing.T) {
 }`
 	spec := &parsing.DevContainerSpec{}
 	err := json.Unmarshal([]byte(rawSpec), &spec)
-	if err != nil {
-		fmt.Println(err)
-		t.Fail()
-		return
-	}
+	assert.NoError(t, err)
 	ctx, cancel := testing_util.GetTestCtxWithEnvTimeoutOrDefault(context.Background(), time.Minute)
 	defer cancel()
 	g := EmptyGraph()
 	root := Root()
 	cacheDir, err := getOrCreateDefaultCacheDir()
-	if err != nil {
-		fmt.Println(err)
-		t.FailNow()
-	}
+	assert.NoError(t, err)
 	err = resolveMany(ctx, &g, root, spec.Features.Features, cacheDir)
-	if err != nil {
-		fmt.Println(err)
-		t.FailNow()
-	}
+	assert.NoError(t, err)
 	installationOrder := topologicalSort(root, g.nodes)
 	emptyWkspDir, err := os.MkdirTemp(os.TempDir(), "empty_workspace")
-	if err != nil {
-		fmt.Println(err)
-		t.FailNow()
-	}
+	assert.NoError(t, err)
 	defer func() {
-		os.RemoveAll(emptyWkspDir)
+		assert.NoError(t, os.RemoveAll(emptyWkspDir))
 	}()
 	dockerContext, err := prepareDockerBuildImageOnly(spec, installationOrder, spec.Image, cacheDir, emptyWkspDir)
-	if err != nil {
-		fmt.Println(err)
-		t.FailNow()
-	}
+	assert.NoError(t, err)
 	// TODO(juf): Adjust so that this can run with podman or other OCI image builders
 	cmd := exec.Command("docker", "build", "-")
 	cmd.Stdin = dockerContext
 	o, err := cmd.CombinedOutput()
 	fmt.Println(string(o))
-	if err != nil {
-		fmt.Println(err)
-		t.FailNow()
-	}
+	assert.NoError(t, err)
 }

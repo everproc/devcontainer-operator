@@ -21,9 +21,8 @@ func tarGzFromWorkspaceAndCacheWithFile(
 	out io.Writer,
 ) error {
 	gz := gzip.NewWriter(out)
-	defer gz.Close()
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	defer MustClose(tw, gz)
 
 	hdr := &tar.Header{
 		Name: fileName,
@@ -72,7 +71,7 @@ func tarGzFromWorkspaceAndCacheWithFile(
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer MustClose(f)
 		_, err = io.Copy(tw, f)
 		return err
 	})
@@ -116,7 +115,7 @@ func tarGzFromWorkspaceAndCacheWithFile(
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer MustClose(f)
 		_, err = io.Copy(tw, f)
 		return err
 	})

@@ -63,7 +63,7 @@ func renderRecursiveInternal[T id](
 	nodeName := node.Data.Name()
 
 	sb.WriteString(currentLinePrefix)
-	sb.WriteString(fmt.Sprintf("[%s]", nodeName))
+	fmt.Fprintf(sb, "[%s]", nodeName)
 
 	if _, ok := visited[nodeID]; ok {
 		sb.WriteString(" (ref...)\n") // Node already visited, indicate reference

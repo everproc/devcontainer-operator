@@ -15,10 +15,10 @@ func GetTestCtxWithEnvTimeoutOrDefault(parentCtx context.Context, defaultVal tim
 	if envVal != "" {
 		envDur, err := strconv.Atoi(envVal)
 		if err != nil {
-			panic(fmt.Sprintf("Invalid %s provided, given: %q, expected integer", ENV_TEST_TIMEOUT_IN_SECS, envVal))
+			panic(fmt.Sprintf("invalid %s provided, given: %q, expected integer", ENV_TEST_TIMEOUT_IN_SECS, envVal))
 		}
 		// debattable
 		defaultVal = time.Duration(envDur) * time.Second
 	}
-	return context.WithTimeoutCause(parentCtx, defaultVal, fmt.Errorf("Test timeout of %ds reached", defaultVal))
+	return context.WithTimeoutCause(parentCtx, defaultVal, fmt.Errorf("test timeout of %ds reached", defaultVal))
 }
