@@ -2,10 +2,13 @@ package features
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path"
 	"strings"
 	"text/template"
+
+	"github.com/moby/buildkit/frontend/dockerfile/parser"
 
 	"everproc.com/devcontainer/internal/parsing"
 )
@@ -46,8 +49,31 @@ type tplData struct {
 	Options     []optTplData
 }
 
+func baseImageFromDockerfile(contents io.Reader) (string, error) {
+	res, err := parser.Parse(contents)
+	if err != nil {
+		return "", err
+	}
+	root := res.AST
+	fromSexps := make([]*parser.Node, 0)
+
+	for _, sexp := range root.Children {
+		if sexp.Value == "FROM" {
+			fromSexps = append(fromSexps, sexp)
+		}
+	}
+	fromImageRefs := make([]string, 0)
+	for _, sexp := range fromSexps {
+		next := sexp.Next
+		if next != nil {
+			fromImageRefs = append(fromImageRefs, next.Value)
+		}
+	}
+	return fromImageRefs[len(fromImageRefs)-1], nil
+}
+
 // This method only works when there is NO custom dockerfile from the developer and only an image is specified
-func PrepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrder []*Node[*Feature], baseImage string, cacheDir string) (*bytes.Buffer, error) {
+func prepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrder []*Node[*Feature], baseImage, cacheDir, workspaceDir string) (*bytes.Buffer, error) {
 	dirName, err := os.MkdirTemp(os.TempDir(), "devcontainer_")
 	if err != nil {
 		return nil, err
@@ -60,7 +86,7 @@ func PrepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrd
 	dockerfileFeatureLayer := &strings.Builder{}
 	containerUser := spec.ContainerUser
 	if containerUser == "" {
-		containerUser = "root"
+		containerUser = "root" // not sure if spec compliant
 	}
 	remoteUser := spec.RemoteUser
 	if remoteUser == "" {
@@ -103,18 +129,18 @@ func PrepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrd
 		BaseImage         string
 		PathToFeatureData string
 		FeatureLayer      string
-		UserDockerfile    string
+		UserDockerfile    string // unused
 	}{
 		BaseImage:         baseImage,
 		PathToFeatureData: dirName,
 		FeatureLayer:      dockerfileFeatureLayer.String(),
-		UserDockerfile:    "",
+		UserDockerfile:    "", // unused
 	})
 	if err != nil {
 		panic(err)
 	}
 	dockerContext := bytes.NewBuffer(nil)
-	if err := TarGzWithInjectedFile(cacheDir, []byte(dockerfile.String()), "Dockerfile", dockerContext); err != nil {
+	if err := tarGzFromWorkspaceAndCacheWithFile(workspaceDir, cacheDir, []byte(dockerfile.String()), "Dockerfile", dockerContext); err != nil {
 		return nil, err
 	}
 

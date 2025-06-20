@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
 
 	"everproc.com/devcontainer/internal/parsing"
+	"everproc.com/devcontainer/internal/testing_util"
 )
 
 func Test_parse_and_build_docker_image(t *testing.T) {
@@ -28,7 +30,7 @@ func Test_parse_and_build_docker_image(t *testing.T) {
 		t.Fail()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := testing_util.GetTestCtxWithEnvTimeoutOrDefault(context.Background(), time.Minute)
 	defer cancel()
 	g := EmptyGraph()
 	root := Root()
@@ -43,11 +45,20 @@ func Test_parse_and_build_docker_image(t *testing.T) {
 		t.FailNow()
 	}
 	installationOrder := topologicalSort(root, g.nodes)
-	dockerContext, err := PrepareDockerBuildImageOnly(spec, installationOrder, spec.Image, cacheDir)
+	emptyWkspDir, err := os.MkdirTemp(os.TempDir(), "empty_workspace")
 	if err != nil {
 		fmt.Println(err)
 		t.FailNow()
 	}
+	defer func() {
+		os.RemoveAll(emptyWkspDir)
+	}()
+	dockerContext, err := prepareDockerBuildImageOnly(spec, installationOrder, spec.Image, cacheDir, emptyWkspDir)
+	if err != nil {
+		fmt.Println(err)
+		t.FailNow()
+	}
+	// TODO(juf): Adjust so that this can run with podman or other OCI image builders
 	cmd := exec.Command("docker", "build", "-")
 	cmd.Stdin = dockerContext
 	o, err := cmd.CombinedOutput()

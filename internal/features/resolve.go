@@ -203,15 +203,12 @@ func getOrCreateDefaultCacheDir() (string, error) {
 	if err != nil {
 		panic(err)
 	}
-	cacheDir := path.Join(cwd, DEFAULT_CACHE_DIR)
+	return getOrCreateCacheDir(cwd)
+}
 
-	// TODO(juf): Move out of this function
-	if _, err := os.Stat(cacheDir); err != nil {
-		if err := os.Mkdir(cacheDir, 0700); err != nil {
-			return "", err
-		}
-	}
-	return cacheDir, nil
+func getOrCreateCacheDir(relPath string) (string, error) {
+	cacheDir := path.Join(relPath, DEFAULT_CACHE_DIR)
+	return cacheDir, createDirIfNotExists(cacheDir)
 }
 
 func featureCacheSubDir(cacheDir, digest string) string {
@@ -251,10 +248,8 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 	}
 
 	ftCachePath := featureCacheSubDir(cacheDir, ft.Digest)
-	if _, err := os.Stat(ftCachePath); err != nil {
-		if err := os.Mkdir(ftCachePath, 0700); err != nil {
-			return err
-		}
+	if err := createDirIfNotExists(ftCachePath); err != nil {
+		return err
 	}
 
 	// Iterate over layers and print info and contents
@@ -280,18 +275,12 @@ func resolve(ctx context.Context, graph *Graph[*Feature], parent *Node[*Feature]
 				}
 				p := path.Join(ftCachePath, header.Name)
 				if header.FileInfo().IsDir() {
-					//fmt.Printf("[%s]\n", header.FileInfo().Name())
 					if _, err := os.Stat(p); err != nil {
 						if err := os.Mkdir(p, 0700); err != nil {
 							panic(err)
 						}
 					}
 					continue
-				} else {
-					//if !slices.Contains(relevantFiles, header.FileInfo().Name()) {
-					//	continue
-					//}
-					//fmt.Printf("%s\n", header.FileInfo().Name())
 				}
 				contents, err := io.ReadAll(tr)
 				f, err := os.OpenFile(p, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0700)

@@ -48,12 +48,6 @@ func RenderAsciiGraph[T id](root *Node[T]) string {
 	return sb.String()
 }
 
-// renderRecursiveInternal is a helper function to recursively build the graph string.
-// - sb: The string builder to append output to.
-// - node: The current node to process.
-// - currentLinePrefix: The prefix for the current node's line (e.g., "├── ", "│   └── ").
-// - nextLevelIndentPrefix: The base indentation for children of this node (e.g., "│   ", "    ").
-// - visited: A map to keep track of visited node IDs to handle cycles and DAGs.
 func renderRecursiveInternal[T id](
 	sb *strings.Builder,
 	node *Node[T],
@@ -87,9 +81,7 @@ func renderRecursiveInternal[T id](
 			connector = "└── "
 			childContinuationPrefix = "    "
 		}
-		// The prefix for the child's line is the parent's children indent + new connector
 		childLinePrefix := nextLevelIndentPrefix + connector
-		// The indent for the child's own children is parent's children indent + new continuation
 		grandChildrenIndentPrefix := nextLevelIndentPrefix + childContinuationPrefix
 
 		renderRecursiveInternal(sb, leaf, childLinePrefix, grandChildrenIndentPrefix, visited)

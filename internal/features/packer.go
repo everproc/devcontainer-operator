@@ -7,10 +7,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-func TarGzWithInjectedFile(
-	dirPath string,
+// TODO(juf): add helper to read this from .dockerignore and or .gitignore
+var ignorePaths = []string{".git"}
+
+func tarGzFromWorkspaceAndCacheWithFile(
+	workspacePath string,
+	cachePath string,
 	fileContent []byte,
 	fileName string,
 	out io.Writer,
@@ -31,16 +36,63 @@ func TarGzWithInjectedFile(
 	if _, err := tw.Write(fileContent); err != nil {
 		return err
 	}
-
-	// Walk the directory and add files
-	return filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(workspacePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		for _, p := range ignorePaths {
+			if strings.HasPrefix(path, p) {
+				return nil
+			}
 		}
 		if d.IsDir() {
 			return nil
 		}
-		relPath, err := filepath.Rel(dirPath, path)
+		relPath, err := filepath.Rel(cachePath, path)
+		if err != nil {
+			return err
+		}
+		// Avoid name collision with injected file
+		if relPath == fileName {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(fi, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = relPath
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(cachePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		for _, p := range ignorePaths {
+			if strings.HasPrefix(path, p) {
+				return nil
+			}
+		}
+		if d.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(cachePath, path)
 		if err != nil {
 			return err
 		}

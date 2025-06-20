@@ -160,15 +160,19 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 build-parser:
 	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:0.0.7
+	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t localhost:5001/parserapp:0.0.7
 
 build-git-clone:
 	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:0.0.7
+	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t localhost:5001/git-clone:0.0.7
 
 build-utilities: build-parser build-git-clone
 
 build-and-push-utilities: build-utilities
 	kind load docker-image parserapp:0.0.7 parserapp:0.0.7
 	kind load docker-image git-clone:0.0.7 git-clone:0.0.7
+	docker push localhost:5001/parserapp:0.0.7
+	docker push localhost:5001/git-clone:0.0.7
 
 ##@ Dependencies
 

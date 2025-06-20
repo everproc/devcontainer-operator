@@ -99,7 +99,7 @@ func (o *FeatureSpecOptionList) UnmarshalJSON(b []byte) error {
 	for k, v := range raw {
 		var proposals []string = nil
 		if p, ok := v["proposals"]; ok {
-			for _, pv := range p.([]interface{}) {
+			for _, pv := range p.([]any) {
 				proposals = append(proposals, fmt.Sprintf("%s", pv))
 			}
 		}
@@ -138,7 +138,7 @@ type FeatureSpec struct {
 	DocumentationURL string                `json:"documentationURL,omitempty"`
 	LicenseURL       string                `json:"licenseURL,omitempty"`
 	Keywords         []string              `json:"keywords,omitempty"`
-	Options          FeatureSpecOptionList `json:"options,omitempty"`
+	Options          FeatureSpecOptionList `json:"options"`
 	ContainerEnv     map[string]any        `json:"containerEnv,omitempty"`
 	Privileged       bool                  `json:"privileged,omitempty"`
 	Init             bool                  `json:"init,omitempty"`
@@ -146,7 +146,7 @@ type FeatureSpec struct {
 	SecurityOpt      []string              `json:"securityOpt,omitempty"`
 	Entrypoint       string                `json:"entrypoint,omitempty"`
 	Customizations   map[string]any        `json:"customizations,omitempty"`
-	DependsOn        FeatureList           `json:"dependsOn,omitempty"`
+	DependsOn        FeatureList           `json:"dependsOn"`
 	InstallsAfter    []string              `json:"installsAfter,omitempty"`
 	LegacyIDs        []string              `json:"legacyIds,omitempty"`
 	Deprecated       bool                  `json:"deprecated,omitempty"`
@@ -166,7 +166,7 @@ type DevContainerSpec struct {
 		Dockerfile string `json:"dockerfile"`
 		// A set of name-value pairs containing Docker image build arguments that should be passed when building a Dockerfile.
 		Args map[string]string `json:"args"`
-	} `json:"build,omitempty"`
+	} `json:"build"`
 	Ports map[string]struct {
 		// Display name for the port in the ports view.
 		Label string `json:"label"`
@@ -201,7 +201,7 @@ type Mount struct {
 
 // https://docs.docker.com/engine/storage/bind-mounts/#options-for---mount
 func (m *Mount) UnmarshalJSON(data []byte) error {
-	if string(data) == "null" || string(data) == `""` {
+	if data == nil || string(data) == "null" || string(data) == `""` {
 		return nil
 	}
 	var j any

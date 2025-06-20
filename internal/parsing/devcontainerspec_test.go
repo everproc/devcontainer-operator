@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"everproc.com/devcontainer/internal/parsing"
+
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +16,7 @@ func TestParseBasicExample(t *testing.T) {
 	const f = `{
 	"image": "mcr.microsoft.com/devcontainers/javascript-node:1-18-bullseye",
 	"features": {
-		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
+		"ghcr.io/devcontainers/features/docker-in-docker:2": { "version": "stable" }
 	},
 	"customizations": {
 		"vscode": {
@@ -45,7 +47,7 @@ func TestParseBasicExample(t *testing.T) {
 		Image: "mcr.microsoft.com/devcontainers/javascript-node:1-18-bullseye",
 		Features: parsing.FeatureList{
 			Features: []parsing.FeatureRequest{
-				{Name: "ghcr.io/devcontainers/features/docker-in-docker", Version: "2", Options: map[string]any{}, Raw: "ghcr.io/devcontainers/features/docker-in-docker:2"},
+				{Ref: name.MustParseReference("ghcr.io/devcontainers/features/docker-in-docker:2"), Options: map[string]any{}},
 			},
 		},
 		PostCreateCommand: &parsing.Cmd{

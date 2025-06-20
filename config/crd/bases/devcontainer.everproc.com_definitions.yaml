@@ -15,8 +15,11 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Parsed')].reason
+    - jsonPath: .status.conditions[-1:].reason
       name: ReadyState
+      type: string
+    - jsonPath: .spec.podTemplateSpec.spec.containers[0].image
+      name: Image
       type: string
     name: v1alpha1
     schema:
@@ -52,6 +55,10 @@ spec:
                   dockerfile:
                     type: string
                 type: object
+              features:
+                items:
+                  type: string
+                type: array
               gitHash:
                 type: string
               image:
@@ -8026,6 +8033,8 @@ spec:
                   type: object
                 type: array
             type: object
+        required:
+        - metadata
         type: object
     served: true
     storage: true

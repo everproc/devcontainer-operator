@@ -1,9 +1,15 @@
 set -x
 cd /workspace
-rm -rf *
-ls -lah .
+
+# Check if .git exists to determine if a clone is needed
 if [ ! -d ".git" ]
 then
+    # If .git doesn't exist, ensure the directory is clean for cloning,
+    # but explicitly keep the .tmp directory if it exists.
+    # We remove all files and directories EXCEPT for .tmp and other dotfiles that should persist
+    find . -maxdepth 1 -mindepth 1 -not -name '.tmp' -exec rm -rf {} +
+    ls -lah . # Verify cleanup
+
     if [[ $REPO_URL == "https://"* ]]; then
         git clone $REPO_URL . && git checkout $GIT_HASH_OR_BRANCH && echo "CLONED"
     else

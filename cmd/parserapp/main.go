@@ -23,6 +23,7 @@ import (
 	"github.com/tailscale/hujson"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
+	"everproc.com/devcontainer/internal/features"
 	"everproc.com/devcontainer/internal/parsing"
 )
 
@@ -110,15 +111,15 @@ func main() {
 	devContainerSpec := &parsing.DevContainerSpec{}
 	// converts non-conformant JSON to conformant JSON,
 	// e.g., strips comments, fixes trailing commas. For more info see hujson package.
-	data, err := hujson.Standardize(rawData)
+	sanitizedData, err := hujson.Standardize(rawData)
 	if err != nil {
 		log.Error(err, "could not standardize json")
 		os.Exit(-1)
 		return
 	}
 
-	if err := json.Unmarshal(data, &devContainerSpec); err != nil {
-		log.Error(err, "could not parse json", "file", file, "data", string(data))
+	if err := json.Unmarshal(sanitizedData, &devContainerSpec); err != nil {
+		log.Error(err, "could not parse json", "file", file, "data", string(sanitizedData))
 		os.Exit(-1)
 		return
 	}
@@ -183,10 +184,14 @@ func main() {
 		}
 	}
 	log.Info(fmt.Sprintf("Spec has %d ports", len(ports)))
-	rawData, err = json.Marshal(devContainerSpec)
-	if err != nil {
-		log.Error(err, "Failed to marshal spec")
-		os.Exit(1)
+	featureList := []string{}
+	for _, ft := range devContainerSpec.Features.Features {
+		opts, err := json.Marshal(ft.Options)
+		if err != nil {
+			log.Error(err, "Failed to marshal feature option map", "feature", ft.Ref.String())
+			os.Exit(1)
+		}
+		featureList = append(featureList, fmt.Sprintf("( %q ( %s ))", ft.Ref.String(), opts))
 	}
 
 	targetDefinition.GenerateName = k8sResourceName + "-" // Set the name of the resource
@@ -198,7 +203,7 @@ func main() {
 			Args: orEmptySlice(devContainerSpec.RunArgs),
 		},
 		GitHash:       strings.TrimSpace(string(gitHashRaw)),
-		RawDefinition: string(rawData),
+		RawDefinition: string(sanitizedData),
 		PodTpl: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
@@ -210,6 +215,7 @@ func main() {
 				},
 			},
 		},
+		Features: featureList,
 	}
 	if devContainerSpec.Image != "" {
 		parsedDefinition.PodTpl.Spec.Containers[0].Image = devContainerSpec.Image
@@ -220,6 +226,15 @@ func main() {
 		log.Error(err, "Failed to json.Marshal ParsedData")
 		os.Exit(1)
 	}
+
+	// TODO(juf): Make this a constant so we do not have this dir string in multiple locations
+	ctxFilePath, err := features.Prepare(ctx, devContainerSpec, "/workspace")
+	if err != nil {
+		log.Error(err, "Failed to prepare oci image context")
+		os.Exit(1)
+	}
+	log.Info(fmt.Sprintf("Written oci image context to %s", ctxFilePath))
+	logDir(ctx, path.Dir(ctxFilePath))
 
 	if err := kubeClient.Create(ctx, targetDefinition); err != nil {
 		log.Error(err, "Failed to create ParsedData")

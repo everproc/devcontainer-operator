@@ -61,6 +61,8 @@ spec:
               gitUrl:
                 description: The git url to download the repository.
                 type: string
+              insecureContainerRegistry:
+                type: string
               owner:
                 description: The owner of this workspace
                 type: string

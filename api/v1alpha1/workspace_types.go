@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -42,11 +44,17 @@ type WorkspaceSpec struct {
 	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
 	RegistryCredentials string `json:"registryCredentials"`
 	// +kubebuilder:validation:Optional
+	InsecureContainerRegistry string `json:"insecureContainerRegistry"`
+	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
 	StorageClassName string `json:"storageClassName"`
 	// +kubebuilder:validation:Optional
 	// The owner of this workspace
 	Owner string `json:"owner"`
+}
+
+func (w WorkspaceSpec) UseInsecureRegistry() bool {
+	return strings.ToLower(w.InsecureContainerRegistry) == "true"
 }
 
 const (

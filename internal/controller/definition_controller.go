@@ -244,12 +244,15 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					}
 					patch := client.RawPatch(types.MergePatchType, data)
 					if err := r.Patch(ctx, instance, patch); err != nil {
-						// if err := r.Update(ctx, instance); err != nil {
+						// not sure why this is here
 						time.Sleep(3 * time.Second)
 						log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
 						return ctrl.Result{}, err
 					}
 					log.Info("Successfully updated Definition with Devcontainer JSON info")
+					// not sure if this is a good idea, but it will for sure avoid the next update call complaining
+					// about out of date information
+					instance = &wanted
 				} else {
 					log.Info("No change in Devcontainer JSON info")
 				}
@@ -257,8 +260,9 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	// check if Dockerfile reference exists
-	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
+	requiresCustomImage := instance.Parsed.Build.Dockerfile != "" || len(instance.Parsed.Features) > 0
+	// Check if we need to build a custom image
+	if requiresCustomImage {
 		jobRes, err := r.ensureKanikoJob(ctx, instance, workspace, definitionID)
 		if err != nil {
 			return jobRes, err
@@ -267,6 +271,29 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.Info("Ensure Kaniko job returned non-zero object")
 				return jobRes, nil
 			}
+		}
+		// chance to win at least one nil, nil, nillllll pointer
+		currentImage := instance.Parsed.PodTpl.Spec.Containers[0].Image
+		wantedImage := kanikoImageRef(instance, workspace)
+		if currentImage != wantedImage {
+			wanted := *instance
+			wanted.Parsed.PodTpl.Spec.Containers[0].Image = wantedImage
+			data, err := client.MergeFrom(instance).Data(&wanted)
+			if err != nil {
+				log.Error(err, "Could not create MergePatch for definition")
+				return ctrl.Result{}, err
+			}
+			patch := client.RawPatch(types.MergePatchType, data)
+			if err := r.Patch(ctx, instance, patch); err != nil {
+				// not sure why this is here
+				time.Sleep(1 * time.Second)
+				log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			log.Info("Successfully updated Definition with custom OCI image info")
+			// not sure if this is a good idea, but it will for sure avoid the next update call complaining
+			// about out of date information
+			instance = &wanted
 		}
 	}
 
@@ -354,6 +381,9 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 		log.Info("Parse job is not complete")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+	if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeReady, Status: metav1.ConditionTrue, Reason: "Finished", Message: "Definition reconcile finished"}); err != nil {
+		return ctrl.Result{}, err
+	}
 	// Nothing to do continue
 	return ctrl.Result{}, nil
 }
@@ -361,7 +391,7 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
-		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningOCIBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
@@ -378,7 +408,7 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 			} else {
 				log.Error(err, "Failed to create parse Kaniko pod")
-				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "ProvisioningDockerBuildErr", Message: err.Error()}); err != nil {
+				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "ProvisioningOCIBuildErr", Message: err.Error()}); err != nil {
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{}, err
@@ -396,7 +426,7 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 			return createFn()
 		} else {
 			log.Error(err, "Failed to get Kaniko pod info")
-			return ctrl.Result{}, err
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, err
 		}
 	}
 	podDefinitionID := GetDefinitionIDLabel(kanikoJob)
@@ -413,7 +443,13 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 	}
 	if !JobIsCompleted(kanikoJob) {
 		log.Info("Kaniko pod is not ready")
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "RunningOCIBuild", Message: "OCI Image Build in progress"}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionTrue, Reason: "FinishedOCIBuild", Message: "OCI Image Build finished"}); err != nil {
+		return ctrl.Result{}, err
 	}
 	// Nothing to do continue
 	return ctrl.Result{}, nil
@@ -691,6 +727,11 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 	},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"devcontainerJobRunner": "setup",
+					},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: UtilServiceAccountName,
 					Containers: []corev1.Container{
@@ -733,7 +774,57 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 	return job, nil
 }
 
+func kanikoImageRef(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace) string {
+	return fmt.Sprintf("--destination=%s/%s:%s", workspace.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash)
+}
+
 func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string, pvcName string) (*batchv1.Job, error) {
+	volumes := []corev1.Volume{
+		{
+			Name: pvcName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvcName,
+				},
+			},
+		},
+	}
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      pvcName,
+			MountPath: "/workspace",
+		},
+	}
+	if workspace.Spec.RegistryCredentials != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "docker-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: workspace.Spec.RegistryCredentials,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  ".dockerconfigjson",
+							Path: "config.json",
+						},
+					},
+				},
+			},
+		},
+		)
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "docker-secret",
+			MountPath: "/kaniko/.docker",
+		})
+	}
+	args := []string{
+		// dockerfile is inside the context.tgz
+		"--context=tar:///workspace/.docker_context/context.tgz",
+		kanikoImageRef(inst, workspace),
+	}
+	if workspace.Spec.UseInsecureRegistry() {
+		args = append(args, "--insecure")
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.kanikoJobName(inst),
@@ -744,50 +835,15 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "kaniko",
-							Image: "gcr.io/kaniko-project/executor:latest",
-							Args: []string{
-								fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
-								"--context=dir://workspace",
-								fmt.Sprintf("--destination=%s/%s:%s", workspace.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash),
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "docker-secret",
-									MountPath: "/kaniko/.docker",
-								},
-								{
-									Name:      pvcName,
-									MountPath: "/workspace",
-								},
-							},
+							Name: "kaniko",
+							// TODO(juf): We should not use latest + make this configurable
+							Image:        "gcr.io/kaniko-project/executor:latest",
+							Args:         args,
+							VolumeMounts: volumeMounts,
 						},
 					},
 					RestartPolicy: corev1.RestartPolicyNever,
-					Volumes: []corev1.Volume{
-						{
-							Name: "docker-secret",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: workspace.Spec.RegistryCredentials,
-									Items: []corev1.KeyToPath{
-										{
-											Key:  ".dockerconfigjson",
-											Path: "config.json",
-										},
-									},
-								},
-							},
-						},
-						{
-							Name: pvcName,
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: pvcName,
-								},
-							},
-						},
-					},
+					Volumes:       volumes,
 				},
 			},
 		},
@@ -849,7 +905,8 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitionID string) corev1.Container {
 	pvcName := WorkspacePVCName(inst)
 	return corev1.Container{
-		Name: "parser",
+		Name:            "parser",
+		ImagePullPolicy: corev1.PullAlways,
 		// TODO (juf): make configurable
 		Image: PARSERAPP_IMAGE_NAME,
 		Args: []string{
