@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -248,4 +249,9 @@ func UncommentCode(filename, target, prefix string) error {
 	// false positive
 	// nolint:gosec
 	return os.WriteFile(filename, out.Bytes(), 0644)
+}
+
+// StringToReader converts a string to an io.Reader for use with kubectl stdin
+func StringToReader(s string) io.Reader {
+	return strings.NewReader(s)
 }
