@@ -102,7 +102,9 @@ spec:
 
 			By("verifying features processing capability")
 			// Check if the parserapp processed the devcontainer.json
-			cmd = exec.Command("kubectl", "get", "configmaps", "-n", testNamespace, "-l", "app.kubernetes.io/name=devcontainer", "-o", "jsonpath={.items[0].binaryData.definition}")
+			cmd = exec.Command("kubectl", "get", "configmaps", "-n", testNamespace,
+				"-l", "app.kubernetes.io/name=devcontainer",
+				"-o", "jsonpath={.items[0].binaryData.definition}")
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty(), "Definition should contain parsed data")
@@ -200,7 +202,9 @@ spec:
 
 			By("verifying the features processing completed")
 			// Check that the definition has the features field populated
-			cmd = exec.Command("kubectl", "get", "configmaps", "-n", testNamespace, "-l", "app.kubernetes.io/name=devcontainer", "-o", "jsonpath={.items[0].binaryData.definition}")
+			cmd = exec.Command("kubectl", "get", "configmaps", "-n", testNamespace,
+				"-l", "app.kubernetes.io/name=devcontainer",
+				"-o", "jsonpath={.items[0].binaryData.definition}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty(), "Definition should contain processed features data")
@@ -211,4 +215,3 @@ spec:
 		})
 	})
 })
-

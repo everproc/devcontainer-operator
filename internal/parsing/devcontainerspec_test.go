@@ -47,7 +47,7 @@ func TestParseBasicExample(t *testing.T) {
 		Image: "mcr.microsoft.com/devcontainers/javascript-node:1-18-bullseye",
 		Features: parsing.FeatureList{
 			Features: []parsing.FeatureRequest{
-				{Ref: name.MustParseReference("ghcr.io/devcontainers/features/docker-in-docker:2"), Options: map[string]any{}},
+				{Ref: name.MustParseReference("ghcr.io/devcontainers/features/docker-in-docker:2"), Options: map[string]any{"version": "stable"}},
 			},
 		},
 		PostCreateCommand: &parsing.Cmd{
