@@ -171,9 +171,9 @@ type DevContainerSpec struct {
 		// Display name for the port in the ports view.
 		Label string `json:"label"`
 	} `json:"portsAttributes"`
-	// TODO(juf): Add comments so it looks like AI generated code
+	// Specifies the username to use when connecting to the remote development environment.
 	RemoteUser string `json:"remoteUser"`
-	// TODO(juf): Add comments so it looks like AI generated code
+	// Specifies the username to use inside the container during development.
 	ContainerUser string `json:"containerUser"`
 	// This command is the last of three that finalizes container setup when a dev container is created.
 	PostCreateCommand *Cmd `json:"postCreateCommand"`

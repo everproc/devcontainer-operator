@@ -2,6 +2,7 @@ package features
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -68,6 +69,9 @@ func baseImageFromDockerfile(contents io.Reader) (string, error) {
 		if next != nil {
 			fromImageRefs = append(fromImageRefs, next.Value)
 		}
+	}
+	if len(fromImageRefs) == 0 {
+		return "", fmt.Errorf("no FROM instructions found in Dockerfile")
 	}
 	return fromImageRefs[len(fromImageRefs)-1], nil
 }

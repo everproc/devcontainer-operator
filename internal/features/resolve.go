@@ -179,6 +179,7 @@ func mergeOptions(user map[string]any, feature parsing.FeatureSpecOptionList) ma
 		}
 		fKeys = append(fKeys, fk)
 	}
+	sort.Strings(fKeys) // Ensure fKeys is sorted before binary search
 	// TODO(juf): This whole function might be utterly inefficient, this is basically just a MAKE IT WORK implementation
 	for _, uk := range uKeys {
 		_, ok := slices.BinarySearch(fKeys, uk)

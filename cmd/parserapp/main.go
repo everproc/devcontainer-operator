@@ -48,6 +48,7 @@ var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Vers
 
 const DEFINITION_ENV_NAME = "DEFINITION_ENV_NAME"
 const DEFINITION_ENV_ID = "DEFINITION_ENV_ID"
+const DEBUG_MODE = "true"
 
 func main() {
 	log := zap.New()
@@ -63,10 +64,10 @@ func main() {
 		return
 	}
 	file := os.Args[1]
-	// Debug
-	logDir(ctx, ".")
-	// Debug
-	logDir(ctx, path.Dir("/workspace"))
+	if os.Getenv("DEBUG_MODE") == DEBUG_MODE {
+		logDir(ctx, ".")
+		logDir(ctx, path.Dir("/workspace"))
+	}
 	for {
 		_, err := os.Stat("/workspace/.tmp/git_status/clone_done")
 		if err != nil {
@@ -94,8 +95,9 @@ func main() {
 		return
 	}
 
-	// Debug
-	logDir(ctx, path.Dir(file))
+	if os.Getenv("DEBUG_MODE") == DEBUG_MODE {
+		logDir(ctx, path.Dir(file))
+	}
 	reader, err := os.Open(file)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("could not open file: %v", err))
@@ -234,7 +236,9 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info(fmt.Sprintf("Written oci image context to %s", ctxFilePath))
-	logDir(ctx, path.Dir(ctxFilePath))
+	if os.Getenv("DEBUG_MODE") == DEBUG_MODE {
+		logDir(ctx, path.Dir(ctxFilePath))
+	}
 
 	if err := kubeClient.Create(ctx, targetDefinition); err != nil {
 		log.Error(err, "Failed to create ParsedData")

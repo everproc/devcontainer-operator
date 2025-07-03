@@ -19,8 +19,8 @@ func createDirIfNotExists(dir string) error {
 func MustClose(writers ...io.Closer) {
 	for idx, w := range writers {
 		if w == nil {
-			// not sure if this is good design
-			return
+			// Skip nil closers and continue to the next one
+			continue
 		}
 		if err := w.Close(); err != nil {
 			t := reflect.TypeOf(w)

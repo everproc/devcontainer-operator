@@ -85,6 +85,20 @@ func TestParseFeature(t *testing.T) {
 		t.Fail()
 		return
 	}
+
+	// Verify the parsed FeatureSpec fields
+	assert.Equal(t, "My Feature", x.Name)
+	assert.Equal(t, "myFeature", x.ID)
+	assert.Equal(t, "1.0.0", x.Version)
+	assert.Len(t, x.DependsOn.Features, 3)
+
+	// Verify DependsOn behavior
+	expectedRefs := []string{"foo:1", "bar:1.2.3", "baz@sha256:a4cdc44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+	actualRefs := make([]string, len(x.DependsOn.Features))
+	for i, feature := range x.DependsOn.Features {
+		actualRefs[i] = feature.Ref.String()
+	}
+	assert.ElementsMatch(t, expectedRefs, actualRefs)
 }
 
 func TestParseMounts(t *testing.T) {
