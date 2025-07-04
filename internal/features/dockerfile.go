@@ -2,6 +2,7 @@ package features
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,18 +51,22 @@ type tplData struct {
 	Options     []optTplData
 }
 
-func baseImageFromDockerfile(contents io.Reader) (string, error) {
+var ErrRequiresImageOrDockerfile = errors.New("the spec must contain either an image or a dockerfile")
+
+func baseImageFromDockerfile(contents io.Reader) (string, []string, error) {
 	res, err := parser.Parse(contents)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	root := res.AST
 	fromSexps := make([]*parser.Node, 0)
+	allSexps := make([]*parser.Node, 0)
 
 	for _, sexp := range root.Children {
 		if sexp.Value == "FROM" {
 			fromSexps = append(fromSexps, sexp)
 		}
+		allSexps = append(allSexps, sexp)
 	}
 	fromImageRefs := make([]string, 0)
 	for _, sexp := range fromSexps {
@@ -70,14 +75,37 @@ func baseImageFromDockerfile(contents io.Reader) (string, error) {
 			fromImageRefs = append(fromImageRefs, next.Value)
 		}
 	}
-	if len(fromImageRefs) == 0 {
-		return "", fmt.Errorf("no FROM instructions found in Dockerfile")
+	remainder := make([]string, 0)
+	allSexps = allSexps[1:]
+	for _, sexp := range allSexps {
+		remainder = append(remainder, sexp.Original)
 	}
-	return fromImageRefs[len(fromImageRefs)-1], nil
+
+	if len(fromImageRefs) == 0 {
+		return "", nil, fmt.Errorf("no FROM instructions found in Dockerfile")
+	}
+	return fromImageRefs[len(fromImageRefs)-1], remainder, nil
 }
 
 // This method only works when there is NO custom dockerfile from the developer and only an image is specified
-func prepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrder []*Node[*Feature], baseImage, cacheDir, workspaceDir string) (*bytes.Buffer, error) {
+func prepareDockerBuild(spec *parsing.DevContainerSpec, installationOrder []*Node[*Feature], cacheDir, workspaceDir string) (*bytes.Buffer, error) {
+	var baseImage string
+	var baseDockerfileInstructions []string
+	if spec.Build.Dockerfile != "" {
+		f, err := os.Open(path.Join(workspaceDir, spec.Build.Dockerfile))
+		if err != nil {
+			return nil, err
+		}
+		defer MustClose(f)
+		baseImage, baseDockerfileInstructions, err = baseImageFromDockerfile(f)
+		if err != nil {
+			return nil, err
+		}
+	} else if spec.Image != "" {
+		baseImage = spec.Image
+	} else {
+		return nil, ErrRequiresImageOrDockerfile
+	}
 	dirName, err := os.MkdirTemp(os.TempDir(), "devcontainer_")
 	if err != nil {
 		return nil, err
@@ -142,6 +170,13 @@ func prepareDockerBuildImageOnly(spec *parsing.DevContainerSpec, installationOrd
 	})
 	if err != nil {
 		panic(err)
+	}
+	if len(baseDockerfileInstructions) > 0 {
+		dockerfile.WriteString("\n")
+		for _, ln := range baseDockerfileInstructions {
+			dockerfile.WriteString("\n")
+			dockerfile.WriteString(ln)
+		}
 	}
 	dockerContext := bytes.NewBuffer(nil)
 	if err := tarGzFromWorkspaceAndCacheWithFile(workspaceDir, cacheDir, []byte(dockerfile.String()), "Dockerfile", dockerContext); err != nil {

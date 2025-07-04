@@ -25,7 +25,7 @@ func Prepare(ctx context.Context, spec *parsing.DevContainerSpec, workspaceDir s
 		return "", err
 	}
 	installationOrder := topologicalSort(root, g.nodes)
-	dockerContext, err := prepareDockerBuildImageOnly(spec, installationOrder, spec.Image, cacheDir, workspaceDir)
+	dockerContext, err := prepareDockerBuild(spec, installationOrder, cacheDir, workspaceDir)
 	if err != nil {
 		return "", err
 	}
