@@ -1,7 +1,11 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/everproc/devcontainer-operator:0.0.7
+IMG_TAG ?= 0.0.7
+IMG ?= ghcr.io/everproc/devcontainer-operator:$(IMG_TAG)
+LOCAL_DOCKER_REGISTRY ?= localhost:5001
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
+PARSERAPP_IMG ?= ghcr.io/everproc/parserapp:$(IMG_TAG)
+GITCLONE_IMG ?= ghcr.io/everproc/git-clone:$(IMG_TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -37,8 +41,7 @@ all: build
 # More info on the awk command:
 # http://linuxcommand.org/lc3_adv_awk.php
 
-.PHONY: help
-help: ## Display this help.
+.PHONY: help help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
@@ -159,20 +162,22 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 build-parser:
-	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:0.0.7
-	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t localhost:5001/parserapp:0.0.7
+	$(CONTAINER_TOOL) build -f Dockerfile.parserapp . -t parserapp:$(IMG_TAG)
 
 build-git-clone:
-	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:0.0.7
-	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t localhost:5001/git-clone:0.0.7
+	$(CONTAINER_TOOL) build -f Dockerfile.gitclone . -t git-clone:$(IMG_TAG)
 
 build-utilities: build-parser build-git-clone
 
-build-and-push-utilities: build-utilities
-	kind load docker-image parserapp:0.0.7 parserapp:0.0.7
-	kind load docker-image git-clone:0.0.7 git-clone:0.0.7
-	docker push localhost:5001/parserapp:0.0.7
-	docker push localhost:5001/git-clone:0.0.7
+load-utilities-via-kind: build-utilities
+	kind load docker-image parserapp:$(IMG_TAG) parserapp:$(IMG_TAG)
+	kind load docker-image git-clone:$(IMG_TAG) git-clone:$(IMG_TAG)
+
+push-utilities-local-registry: build-utilities
+	$(CONTAINER_TOOL) image tag parserapp:$(IMG_TAG) $(LOCAL_DOCKER_REGISTRY)/parserapp:$(IMG_TAG)
+	$(CONTAINER_TOOL) image tag git-clone:$(IMG_TAG) $(LOCAL_DOCKER_REGISTRY)/git-clone:$(IMG_TAG)
+	$(CONTAINER_TOOL) push $(LOCAL_DOCKER_REGISTRY)/parserapp:$(IMG_TAG)
+	$(CONTAINER_TOOL) push $(LOCAL_DOCKER_REGISTRY)/git-clone:$(IMG_TAG)
 
 ##@ Dependencies
 
