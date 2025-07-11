@@ -171,8 +171,8 @@ build-git-clone:
 build-utilities: build-parser build-git-clone
 
 load-utilities-via-kind: build-utilities
-	kind load docker-image parserapp:$(IMG_TAG) parserapp:$(IMG_TAG)
-	kind load docker-image git-clone:$(IMG_TAG) git-clone:$(IMG_TAG)
+	kind load docker-image parserapp:$(IMG_TAG)
+	kind load docker-image git-clone:$(IMG_TAG)
 
 push-utilities-local-registry: build-utilities
 	$(CONTAINER_TOOL) image tag parserapp:$(IMG_TAG) $(LOCAL_DOCKER_REGISTRY)/parserapp:$(IMG_TAG)
