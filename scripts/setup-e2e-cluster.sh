@@ -36,7 +36,7 @@ echo "Deploying operator..."
 make deploy IMG=example.com/devcontainer:v0.0.1
 
 echo "Waiting for operator to be ready..."
-kubectl wait --for=condition=Available deployment/devcontainer-controller-manager -n devcontainer-system --timeout=300s
+kubectl wait --for=condition=Available deployment/devcontainer-controller-manager -n devcontainer-operator --timeout=300s
 
 echo "Setup complete! You can now run e2e tests with:"
 echo "  make test-e2e"

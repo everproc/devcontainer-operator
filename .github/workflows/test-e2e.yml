@@ -21,6 +21,12 @@ jobs:
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
       - name: Verify kind installation
         run: kind version
 
@@ -42,10 +48,13 @@ jobs:
         run: make install
 
       - name: Deploy operator
-        run: make deploy IMG=example.com/devcontainer:v0.0.1
+        run: |
+          make manifests
+          cd config/manager && ../../bin/kustomize edit set image controller=example.com/devcontainer:v0.0.1
+          cd ../.. && bin/kustomize build config/default | kubectl apply --server-side -f -
 
       - name: Wait for operator to be ready
-        run: kubectl wait --for=condition=Available deployment/devcontainer-controller-manager -n devcontainer-system --timeout=300s
+        run: kubectl wait --for=condition=Available deployment/devcontainer-controller-manager -n devcontainer-operator --timeout=300s
 
       - name: Running Test e2e
         run: |

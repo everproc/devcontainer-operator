@@ -10,7 +10,7 @@ if ! kubectl cluster-info &> /dev/null; then
 fi
 
 # Check if operator is deployed
-if ! kubectl get deployment devcontainer-controller-manager -n devcontainer-system &> /dev/null; then
+if ! kubectl get deployment devcontainer-controller-manager -n devcontainer-operator &> /dev/null; then
     echo "Error: devcontainer-operator not found. Please run ./scripts/setup-e2e-cluster.sh first."
     exit 1
 fi
