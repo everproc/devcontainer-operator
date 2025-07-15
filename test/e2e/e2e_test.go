@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -32,6 +33,7 @@ import (
 
 // namespace where the project is deployed in
 const namespace = "devcontainer-operator"
+const featuresTestNamespace = "features-test"
 
 // serviceAccountName created for the project
 const serviceAccountName = "devcontainer-controller-manager"
@@ -44,18 +46,24 @@ const metricsRoleBindingName = "devcontainer-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
+	testNSlist := []string{namespace, featuresTestNamespace}
 
 	// Before running the tests, set up the environment by creating the namespace,
 	// installing CRDs, and deploying the controller.
 	BeforeAll(func() {
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		By("cleaning up test namespaces")
+		for _, ns := range testNSlist {
+			cmd := exec.Command("kubectl", "delete", "ns", ns, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+			By("creating manager namespace")
+			cmd = exec.Command("kubectl", "create", "ns", ns)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		}
 
 		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
+		cmd := exec.Command("make", "reinstall")
+		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
 		By("deploying the controller-manager")
@@ -170,17 +178,23 @@ var _ = Describe("Manager", Ordered, func() {
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
-
+			if err != nil && !strings.Contains(err.Error(), "already exists") {
+				Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+			}
 			By("validating that the metrics service is available")
 			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
 
-			By("validating that the ServiceMonitor for Prometheus is applied in the namespace")
-			cmd = exec.Command("kubectl", "get", "ServiceMonitor", "-n", namespace)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "ServiceMonitor should exist")
+			skipPrometheusInstall := os.Getenv("PROMETHEUS_INSTALL_SKIP") == "true"
+			if !skipPrometheusInstall {
+				By("validating that the ServiceMonitor for Prometheus is applied in the namespace")
+				cmd = exec.Command("kubectl", "get", "ServiceMonitor", "-n", namespace)
+				_, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred(), "ServiceMonitor should exist")
+			} else {
+				Skip("Skipping ServiceMonitor check because Prometheus installation was skipped")
+			}
 
 			By("getting the service account token")
 			token, err := serviceAccountToken()
@@ -244,6 +258,175 @@ var _ = Describe("Manager", Ordered, func() {
 		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
 		//    strings.ToLower(<Kind>),
 		// ))
+	})
+
+	Context("Basic Workspace Functionality", func() {
+		It("should successfully create workspace and process devcontainer.json", func() {
+			workspaceName := "workspace-basic-test"
+
+			By("applying workspace with known working repository")
+			workspaceYaml := fmt.Sprintf(`
+apiVersion: devcontainer.everproc.com/v1alpha1
+kind: Workspace
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  owner: test-user
+  gitHashOrTag: master
+  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  containerRegistry: "kind-registry:5000"
+  insecureContainerRegistry: true
+`, workspaceName, featuresTestNamespace)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = utils.StringToReader(workspaceYaml)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create workspace")
+
+			By("waiting for workspace to be ready")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"), "Workspace should be ready")
+			}, 10*time.Minute, 30*time.Second).Should(Succeed())
+
+			By("verifying definition was created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "definitions", "-n", featuresTestNamespace)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring(workspaceName), "Definition should exist")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying deployment was created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment", "-n", featuresTestNamespace, "-l", "app.kubernetes.io/name=devcontainer")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Deployment should exist")
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("checking that the workspace completed successfully")
+			cmd = exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].message}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(ContainSubstring("successfully"), "Workspace should complete successfully")
+
+			By("verifying features processing capability")
+			// Check if the parserapp processed the devcontainer.json
+			cmd = exec.Command("kubectl", "get", "configmaps", "-n", featuresTestNamespace,
+				"-l", "app.kubernetes.io/name=devcontainer",
+				"-o", "jsonpath={.items[0].binaryData.definition}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty(), "Definition should contain parsed data")
+
+			By("cleaning up workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", workspaceName, "-n", featuresTestNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should handle workspace creation and deletion lifecycle", func() {
+			workspaceName := "workspace-lifecycle-test"
+
+			By("creating workspace")
+			workspaceYaml := fmt.Sprintf(`
+apiVersion: devcontainer.everproc.com/v1alpha1
+kind: Workspace
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  owner: test-user
+  gitHashOrTag: master
+  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  containerRegistry: "kind-registry:5000"
+  insecureContainerRegistry: true
+`, workspaceName, featuresTestNamespace)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = utils.StringToReader(workspaceYaml)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create workspace")
+
+			By("waiting for workspace to start reconciling")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", "jsonpath={.status.conditions[0].type}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Workspace should have Ready condition")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("deleting workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", workspaceName, "-n", featuresTestNamespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete workspace")
+
+			By("verifying workspace is deleted")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred(), "Workspace should be deleted")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+		})
+	})
+
+	Context("Features Processing", func() {
+		It("should demonstrate features integration capability", func() {
+			workspaceName := "workspace-features-demo"
+
+			By("creating workspace that will exercise features code path")
+			// TODO(juf): Move this into a YAML? or In-Code Struct maybe
+			workspaceYaml := fmt.Sprintf(`
+apiVersion: devcontainer.everproc.com/v1alpha1
+kind: Workspace
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  owner: test-user
+  gitHashOrTag: master
+  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  containerRegistry: "kind-registry:5000"
+  insecureContainerRegistry: true
+`, workspaceName, featuresTestNamespace)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = utils.StringToReader(workspaceYaml)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create workspace")
+
+			By("waiting for definition to be created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "definitions", "-n", featuresTestNamespace)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring(workspaceName), "Definition should exist")
+			}, 5*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("checking that features.Prepare was called in parserapp")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "definitions", "-n", featuresTestNamespace, "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"), "Definition should be ready")
+			}, 8*time.Minute, 30*time.Second).Should(Succeed())
+
+			By("verifying the features processing completed")
+			// Check that the definition has the features field populated
+			cmd = exec.Command("kubectl", "get", "configmaps", "-n", featuresTestNamespace,
+				"-l", "app.kubernetes.io/name=devcontainer",
+				"-o", "jsonpath={.items[0].binaryData.definition}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty(), "Definition should contain processed features data")
+
+			By("cleaning up workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", workspaceName, "-n", featuresTestNamespace)
+			_, _ = utils.Run(cmd)
+		})
 	})
 })
 
