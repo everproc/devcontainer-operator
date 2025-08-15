@@ -200,7 +200,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create additional mount PVCs")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		depl, err := r.createDeployment(instance, def.Parsed.PodTpl, &def, definitionID, pvc.Name, mountPVCs)
+		depl, err := r.createDeployment(instance, def.Spec.RuntimePodTpl, &def, definitionID, pvc.Name, mountPVCs)
 		if err != nil {
 			log.Error(err, "Failed to create deployment yaml")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -417,7 +417,11 @@ func (r *WorkspaceReconciler) injectSecret(inst *devcontainerv1alpha1.Workspace,
 }
 
 func (r *WorkspaceReconciler) injectImage(def *devcontainerv1alpha1.Definition, inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec) {
-	tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", inst.Spec.ContainerRegistry, def.Name, def.Parsed.GitHash)
+	if img := def.Spec.RuntimePodTpl.Spec.Containers[0].Image; img != "" {
+		tpl.Spec.Containers[0].Image = img
+	} else {
+		tpl.Spec.Containers[0].Image = fmt.Sprintf("%s/%s:%s", inst.Spec.ContainerRegistry, def.Name, def.Parsed.GitHash)
+	}
 }
 
 func (r *WorkspaceReconciler) injectWorkspace(pvcName, gitUrl, gitDomain, gitHash string, tpl *corev1.PodTemplateSpec) {

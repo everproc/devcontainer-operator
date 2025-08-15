@@ -1,11 +1,11 @@
 # Image URL to use all building/pushing image targets
+REGISTRY ?= ghcr.io
+REPOSITORY ?= everproc/devcontainer-operator
 IMG_TAG ?= 0.0.7
-IMG ?= ghcr.io/everproc/devcontainer-operator:$(IMG_TAG)
-LOCAL_DOCKER_REGISTRY ?= localhost:5001
+IMG ?= $(REGISTRY)/$(REPOSITORY):$(IMG_TAG)
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
-PARSERAPP_IMG ?= ghcr.io/everproc/parserapp:$(IMG_TAG)
-GITCLONE_IMG ?= ghcr.io/everproc/git-clone:$(IMG_TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -84,6 +84,7 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 	}
 	go test ./test/e2e/ -v -ginkgo.v
 
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
@@ -156,7 +157,7 @@ reinstall: uninstall install
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	$(KUSTOMIZE) build config/default | $(KUBECTL) create -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -174,11 +175,14 @@ load-utilities-via-kind: build-utilities
 	kind load docker-image parserapp:$(IMG_TAG)
 	kind load docker-image git-clone:$(IMG_TAG)
 
-push-utilities-local-registry: build-utilities
-	$(CONTAINER_TOOL) image tag parserapp:$(IMG_TAG) $(LOCAL_DOCKER_REGISTRY)/parserapp:$(IMG_TAG)
-	$(CONTAINER_TOOL) image tag git-clone:$(IMG_TAG) $(LOCAL_DOCKER_REGISTRY)/git-clone:$(IMG_TAG)
-	$(CONTAINER_TOOL) push $(LOCAL_DOCKER_REGISTRY)/parserapp:$(IMG_TAG)
-	$(CONTAINER_TOOL) push $(LOCAL_DOCKER_REGISTRY)/git-clone:$(IMG_TAG)
+push-operator-registry: docker-build
+	$(CONTAINER_TOOL) push $(IMG)
+
+push-utilities-registry: build-utilities
+	$(CONTAINER_TOOL) image tag parserapp:$(IMG_TAG) $(REGISTRY)/parserapp:$(IMG_TAG)
+	$(CONTAINER_TOOL) image tag git-clone:$(IMG_TAG) $(REGISTRY)/git-clone:$(IMG_TAG)
+	$(CONTAINER_TOOL) push $(REGISTRY)/parserapp:$(IMG_TAG)
+	$(CONTAINER_TOOL) push $(REGISTRY)/git-clone:$(IMG_TAG)
 
 ##@ Dependencies
 

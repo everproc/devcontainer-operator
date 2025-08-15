@@ -10,6 +10,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true
     registry:2
 fi
 
+
 # 2. Create kind cluster with containerd registry config dir enabled
 #
 # NOTE: the containerd config patch is not necessary with images from kind v0.27.0+
@@ -20,7 +21,7 @@ fi
 # https://github.com/kubernetes-sigs/kind/issues/2875
 # https://github.com/containerd/containerd/blob/main/docs/cri/config.md#registry-configuration
 # See: https://github.com/containerd/containerd/blob/main/docs/hosts.md
-cat <<EOF | kind create cluster --config=-
+cat <<EOF | kind create cluster --image=kindest/node:v1.33.1 --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 containerdConfigPatches:
@@ -42,6 +43,7 @@ for node in $(kind get nodes); do
   docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
   cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
 [host."http://${reg_name}:5000"]
+    skip_verify = true
 EOF
 done
 

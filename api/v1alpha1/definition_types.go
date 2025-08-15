@@ -41,6 +41,10 @@ type RunSpec struct {
 
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
+	// The Runtime PodTpl is the PodTpl which is actually going to be used by
+	// the workspace controller.
+	// +kubebuilder:validation:Optional
+	RuntimePodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
 }
 
 // The parsed devcontainer json.
@@ -59,6 +63,8 @@ type ParsedDefinition struct {
 	GitHash string `json:"gitHash"`
 	// +kubebuilder:validation:Optional
 	Features []string `json:"features"`
+	// +kubebuilder:validation:Optional
+	Synced bool `json:"synced"`
 }
 
 const (
