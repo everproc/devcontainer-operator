@@ -31,34 +31,4 @@ jobs:
         run: kind version
 
       - name: Create kind cluster with registry
-        run: ./scripts/kind-docker.sh
-
-      - name: Wait for cluster to be ready
-        run: kubectl wait --for=condition=Ready nodes --all --timeout=300s
-
-      - name: Build and load operator image
-        run: |
-          make docker-build IMG=example.com/devcontainer:v0.0.1
-          kind load docker-image example.com/devcontainer:v0.0.1
-
-      - name: Build and load utility images
-        run: |
-          make load-utilities-via-kind
-          make load-utilities-via-kind
-          make push-utilities-local-registry 
-
-      - name: Install CRDs
-        run: make install
-
-      - name: Deploy operator
-        run: |
-          kind load docker-image example.com/devcontainer:v0.0.1
-          make deploy IMG=example.com/devcontainer:v0.0.1
-
-      - name: Wait for operator to be ready
-        run: kubectl wait --for=condition=Available deployment/devcontainer-controller-manager -n devcontainer-operator --timeout=300s
-
-      - name: Running Test e2e
-        run: |
-          go mod tidy
-          make test-e2e
+        run: ./local_e2e.sh
