@@ -17,11 +17,8 @@ limitations under the License.
 package e2e
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,15 +30,6 @@ import (
 // namespace where the project is deployed in
 const namespace = "devcontainer-operator"
 const featuresTestNamespace = "features-test"
-
-// serviceAccountName created for the project
-const serviceAccountName = "devcontainer-controller-manager"
-
-// metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "devcontainer-controller-manager-metrics-service"
-
-// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "devcontainer-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -172,7 +160,8 @@ spec:
 
 			By("waiting for workspace to be ready")
 			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+				format := "jsonpath={.status.conditions[?(@.type=='Ready')].status}"
+				cmd := exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", format)
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("True"), "Workspace should be ready")
@@ -195,7 +184,8 @@ spec:
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("checking that the workspace completed successfully")
-			cmd = exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].message}")
+			format := "jsonpath={.status.conditions[?(@.type=='Ready')].message}"
+			cmd = exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", format)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(ContainSubstring("successfully"), "Workspace should complete successfully")
@@ -208,52 +198,3 @@ spec:
 	})
 
 })
-
-// serviceAccountToken returns a token for the specified service account in the given namespace.
-// It uses the Kubernetes TokenRequest API to generate a token by directly sending a request
-// and parsing the resulting token from the API response.
-func serviceAccountToken() (string, error) {
-	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
-
-	// Temporary file to store the token request
-	secretName := fmt.Sprintf("%s-token-request", serviceAccountName)
-	tokenRequestFile := filepath.Join("/tmp", secretName)
-	err := os.WriteFile(tokenRequestFile, []byte(tokenRequestRawString), os.FileMode(0o644))
-	if err != nil {
-		return "", err
-	}
-
-	var out string
-	verifyTokenCreation := func(g Gomega) {
-		// Execute kubectl command to create the token
-		cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
-			"/api/v1/namespaces/%s/serviceaccounts/%s/token",
-			namespace,
-			serviceAccountName,
-		), "-f", tokenRequestFile)
-
-		output, err := cmd.CombinedOutput()
-		g.Expect(err).NotTo(HaveOccurred())
-
-		// Parse the JSON output to extract the token
-		var token tokenRequest
-		err = json.Unmarshal(output, &token)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		out = token.Status.Token
-	}
-	Eventually(verifyTokenCreation).Should(Succeed())
-
-	return out, err
-}
-
-// tokenRequest is a simplified representation of the Kubernetes TokenRequest API response,
-// containing only the token field that we need to extract.
-type tokenRequest struct {
-	Status struct {
-		Token string `json:"token"`
-	} `json:"status"`
-}
