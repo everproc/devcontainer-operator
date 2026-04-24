@@ -41,6 +41,10 @@ type RunSpec struct {
 
 // DefinitionSpec defines the desired state of Definition.
 type DefinitionSpec struct {
+	// The Runtime PodTpl is the PodTpl which is actually going to be used by
+	// the workspace controller.
+	// +kubebuilder:validation:Optional
+	RuntimePodTpl *corev1.PodTemplateSpec `json:"podTemplateSpec"`
 }
 
 // The parsed devcontainer json.
@@ -57,6 +61,10 @@ type ParsedDefinition struct {
 	Run RunSpec `json:"run"`
 	// +kubebuilder:validation:Optional
 	GitHash string `json:"gitHash"`
+	// +kubebuilder:validation:Optional
+	Features []string `json:"features"`
+	// +kubebuilder:validation:Optional
+	Synced bool `json:"synced"`
 }
 
 const (
@@ -93,12 +101,13 @@ type DefinitionStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[?(@.type=='Parsed')].reason"
+// +kubebuilder:printcolumn:name=ReadyState,type=string,JSONPath=".status.conditions[-1:].reason"
+// +kubebuilder:printcolumn:name=Image,type=string,JSONPath=".spec.podTemplateSpec.spec.containers[0].image"
 
 // Definition is the Schema for the definitions API.
 type Definition struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
 	Spec   DefinitionSpec   `json:"spec,omitempty"`
 	Parsed ParsedDefinition `json:"pasedDefinition,omitempty"`

@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
+	"everproc.com/devcontainer/internal/controller/state"
 )
 
 const UtilRoleName = "devcontainer-utility"
@@ -57,6 +58,27 @@ func init() {
 		panic(fmt.Sprintf("Invalid LabelDefinitionMapKey %q: %v", LabelDefinitionMapKey, res))
 	}
 }
+
+func _justErr[S any, R any, E any](defaultS S, defaultR R) func(E) (S, R, E) {
+	return func(e E) (S, R, E) {
+		return defaultS, defaultR, e
+	}
+}
+
+func _justState[S any, R any](defaultR R) func(S) (S, R, error) {
+	return func(s S) (S, R, error) {
+		return s, defaultR, nil
+	}
+}
+
+func justRequeueIn(in_dur time.Duration) (state.State, ctrl.Result, error) {
+	return state.RETURN, ctrl.Result{
+		RequeueAfter: in_dur,
+	}, nil
+}
+
+var justErr = _justErr[state.State, ctrl.Result, error](state.RETURN, ctrl.Result{})
+var justState = _justState[state.State](ctrl.Result{})
 
 // DefinitionReconciler reconciles a Definition object
 type DefinitionReconciler struct {
@@ -124,18 +146,6 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	// definitionID := definitionID(instance)
-	// previousDefinitionID := GetDefinitionIDLabel(instance)
-	// if previousDefinitionID == "" {
-	// 	log.Info("Definition does not have a git hash based ID yet", "definitionID", definitionID)
-	// } else {
-	// 	if previousDefinitionID != definitionID {
-	// 		log.Info("Definition git hash has changed based on definition hash ID", "old", previousDefinitionID, "new", definitionID)
-	// 	} else {
-	// 		log.Info("Definition ID did not change")
-	// 	}
-	// }
-	//
 	definitionID := GetDefinitionIDLabel(instance)
 	workspace := &devcontainerv1alpha1.Workspace{}
 	err = r.Get(ctx, types.NamespacedName{Name: GetWorkspaceNameLabel(instance), Namespace: instance.Namespace}, workspace)
@@ -184,81 +194,14 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	cmList := &corev1.ConfigMapList{}
-	err = r.List(ctx, cmList, client.MatchingLabels{
-		LabelDefinitionMapKey: definitionID,
-	}, client.InNamespace(instance.Namespace))
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if len(cmList.Items) == 0 {
-		log.Info("No ConfigMap for match definitionID found", "definitionID", definitionID)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	} else if len(cmList.Items) > 0 {
-		for _, d := range cmList.Items {
-			id := GetDefinitionIDLabel(&d)
-			if id == "" || id != definitionID {
-				err = r.Delete(ctx, &d)
-				if err != nil {
-					log.Error(err, "Failed to delete old ConfigMap", "configMap", d.Name)
-					return ctrl.Result{}, err
-				}
-			} else {
-				if err := ctrl.SetControllerReference(instance, &d, r.Scheme); err != nil {
-					log.Error(err, "Failed to set owner reference on config map")
-					return ctrl.Result{}, err
-				} else {
-					log.Info("Updated OwnerReferences on ConfigMap", "configMap", d.Name)
-				}
-				if err := r.Update(ctx, &d); err != nil {
-					log.Error(err, "Failed to update config map")
-					return ctrl.Result{}, err
-				}
-				data, ok := d.BinaryData["definition"]
-				if !ok {
-					err := errors.New("ConfigMap should have definition key but it's missing")
-					log.Error(err, "Missing definition key entry from ConfigMap")
-					return ctrl.Result{}, err
-				}
-				if len(data) == 0 {
-					err := errors.New("ConfigMap should have non-empty data under key definition")
-					log.Error(err, "Empty definition in ConfigMap")
-					return ctrl.Result{}, err
-				}
-				parsedDevcontainer := &devcontainerv1alpha1.ParsedDefinition{}
-				if err := json.Unmarshal(data, &parsedDevcontainer); err != nil {
-					log.Error(err, "Could not parse definition from ConfigMap. Either the config map is too old or corrupted")
-					return ctrl.Result{}, err
-				}
-
-				// TODO(juf): This might not be 100% correct, I am not sure if the equality is applicable here, I did not check every field
-				// TODO make it comparable
-				// I hate Go sometimes
-				if !devcontainerv1alpha1.EqualParsedDefinitions(&instance.Parsed, parsedDevcontainer) {
-					wanted := *instance
-					wanted.Parsed = *parsedDevcontainer
-					data, err := client.MergeFrom(instance).Data(&wanted)
-					if err != nil {
-						log.Error(err, "Could not create MergePatch for definition")
-						return ctrl.Result{}, err
-					}
-					patch := client.RawPatch(types.MergePatchType, data)
-					if err := r.Patch(ctx, instance, patch); err != nil {
-						// if err := r.Update(ctx, instance); err != nil {
-						time.Sleep(3 * time.Second)
-						log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
-						return ctrl.Result{}, err
-					}
-					log.Info("Successfully updated Definition with Devcontainer JSON info")
-				} else {
-					log.Info("No change in Devcontainer JSON info")
-				}
-			}
-		}
+	st, res, err := r.ensureInSyncWithConfigMaps(ctx, definitionID, req.NamespacedName, instance)
+	if st == state.RETURN {
+		return res, err
 	}
 
-	// check if Dockerfile reference exists
-	if instance.Parsed.Build.Dockerfile != "" && instance.Parsed.Image == "" {
+	requiresCustomImage := instance.Parsed.Build.Dockerfile != "" || len(instance.Parsed.Features) > 0
+	// Check if we need to build a custom image
+	if requiresCustomImage {
 		jobRes, err := r.ensureKanikoJob(ctx, instance, workspace, definitionID)
 		if err != nil {
 			return jobRes, err
@@ -268,27 +211,143 @@ func (r *DefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				return jobRes, nil
 			}
 		}
+		// chance to win at least one nil, nil, nillllll pointer
+		currentImage := instance.Spec.RuntimePodTpl.Spec.Containers[0].Image
+		wantedImage := kanikoImageRef(instance, workspace)
+		if strings.Contains(wantedImage, "kind") {
+			// Special code for kind cluster testing, which requires the registry to be reachable from two different hosts
+			// but the cluster can only pull from the localhost address, whereas the publisher can only publish
+			// to the kind-registry hostname.
+			// I might be wrong, please correct this or me if this is wrong, but I had to introduce this to make E2E tests work with kind
+			// and the local registry in docker.
+			wantedImage = strings.ReplaceAll(wantedImage, "kind-registry:5000", "localhost:5001")
+		}
+		if currentImage != wantedImage {
+			wanted := instance.DeepCopy()
+			wanted.Spec.RuntimePodTpl.Spec.Containers[0].Image = wantedImage
+			patch := client.MergeFrom(instance)
+			if err := r.Patch(ctx, wanted, patch); err != nil {
+				// not sure why this is here
+				time.Sleep(1 * time.Second)
+				log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			time.Sleep(1 * time.Second)
+			p_data, _ := patch.Data(nil)
+			log.Info("Successfully updated Definition with custom OCI image info", "patch", string(p_data), "wanted", wantedImage, "current", currentImage)
+			// not sure if this is a good idea, but it will for sure avoid the next update call complaining
+			// about out of date information
+			err := r.Get(ctx, req.NamespacedName, instance)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
+	// Only patch if necessary
+	// An alternative check might be to create a client-side patch and see if it has any diff.
+	if val, exists := instance.Labels[LabelDefinitionMapKey]; !exists || val != definitionID {
+		patch := patchDefinitionIDLabel(definitionID)
+		if err := r.Patch(ctx, instance, patchDefinitionIDLabel(definitionID)); err != nil {
+			data, otherErr := patch.Data(instance)
+			if otherErr != nil {
+				log.Error(err, "Patch is broken")
+			}
+			log.Info(fmt.Sprintf("Patch: %+v", string(data)))
+			log.Error(err, "Failed to patch instance with definition ID label")
+			time.Sleep(3 * time.Second)
+			return ctrl.Result{}, err
+		}
+	}
 	if err := r.updateStatusMany(ctx, req.NamespacedName, instance, []metav1.Condition{
 		{Type: devcontainerv1alpha1.DefinitionCondTypeParsed, Status: metav1.ConditionTrue, Reason: "ParsePodSucceeded", Message: "Parsing JSON succeeded"},
 		{Type: devcontainerv1alpha1.DefinitionCondTypeReady, Status: metav1.ConditionTrue, Reason: "ReconcileFinished", Message: fmt.Sprintf("Reconcile finished for id %q", definitionID)}}); err != nil {
 		return ctrl.Result{}, err
 	}
-	patch := patchDefinitionIDLabel(definitionID)
-	if err := r.Patch(ctx, instance, patchDefinitionIDLabel(definitionID)); err != nil {
-		data, otherErr := patch.Data(instance)
-		if otherErr != nil {
-			log.Error(err, "Patch is broken")
-			time.Sleep(10 * time.Second)
-		}
-		log.Info(fmt.Sprintf("Patch: %+v", string(data)))
-		time.Sleep(3 * time.Second)
-		log.Error(err, "Failed to patch instance with definition ID label")
-		return ctrl.Result{}, err
-	}
 	log.Info("Resource was successfully reconciled")
 	return ctrl.Result{}, nil
+}
+
+func (r *DefinitionReconciler) ensureInSyncWithConfigMaps(ctx context.Context, definitionID string, namespacedName types.NamespacedName, instance *devcontainerv1alpha1.Definition) (state.State, ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	cmList := &corev1.ConfigMapList{}
+	err := r.List(ctx, cmList, client.MatchingLabels{
+		LabelDefinitionMapKey: definitionID,
+	}, client.InNamespace(instance.Namespace))
+	if err != nil {
+		return justErr(err)
+	}
+	if len(cmList.Items) == 0 {
+		log.Info("No ConfigMap for match definitionID found", "definitionID", definitionID)
+		return justRequeueIn(5 * time.Second)
+	} else if len(cmList.Items) > 0 {
+		for _, d := range cmList.Items {
+			id := GetDefinitionIDLabel(&d)
+			if id == "" || id != definitionID {
+				err = r.Delete(ctx, &d)
+				if err != nil {
+					log.Error(err, "Failed to delete old ConfigMap", "configMap", d.Name)
+					return justErr(err)
+				}
+			} else {
+				if !instance.Parsed.Synced {
+					if err := ctrl.SetControllerReference(instance, &d, r.Scheme); err != nil {
+						log.Error(err, "Failed to set owner reference on config map")
+						return justErr(err)
+					} else {
+						log.Info("Updated OwnerReferences on ConfigMap", "configMap", d.Name)
+					}
+					if err := r.Update(ctx, &d); err != nil {
+						log.Error(err, "Failed to update config map")
+						return justErr(err)
+					}
+					data, ok := d.BinaryData["definition"]
+					if !ok {
+						err := errors.New("ConfigMap should have definition key but it's missing")
+						log.Error(err, "Missing definition key entry from ConfigMap")
+						return justErr(err)
+					}
+					if len(data) == 0 {
+						err := errors.New("ConfigMap should have non-empty data under key definition")
+						log.Error(err, "Empty definition in ConfigMap")
+						return justErr(err)
+					}
+					parsedDevcontainer := &devcontainerv1alpha1.ParsedDefinition{}
+					if err := json.Unmarshal(data, &parsedDevcontainer); err != nil {
+						log.Error(err, "Could not parse definition from ConfigMap. Either the config map is too old or corrupted")
+						return justErr(err)
+					}
+
+					// TODO(juf): This might not be 100% correct, I am not sure if the equality is applicable here, I did not check every field
+					// TODO make it comparable
+					// I hate Go sometimes
+					if !devcontainerv1alpha1.EqualParsedDefinitions(&instance.Parsed, parsedDevcontainer) {
+						wanted := instance.DeepCopy()
+						wanted.Parsed = *parsedDevcontainer
+						wanted.Spec.RuntimePodTpl = wanted.Parsed.PodTpl.DeepCopy()
+						wanted.Parsed.Synced = true
+						patch := client.MergeFrom(instance)
+						if err := r.Patch(ctx, wanted, patch); err != nil {
+							// not sure why this is here
+							time.Sleep(3 * time.Second)
+							log.Error(err, "Failed to update Definition with parsed Devcontainer JSON info")
+							return justErr(err)
+						}
+						log.Info("Successfully updated Definition with Devcontainer JSON info")
+						// not sure if this is a good idea, but it will for sure avoid the next update call complaining
+						// about out of date information
+						err := r.Get(ctx, namespacedName, instance)
+						if err != nil {
+							return justErr(err)
+						}
+					} else {
+						log.Info("No change in Devcontainer JSON info")
+					}
+				}
+			}
+		}
+	}
+	return justState(state.CONTINUE)
 }
 
 func patchDefinitionIDLabel(newDefinitionID string) client.Patch {
@@ -354,6 +413,9 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 		log.Info("Parse job is not complete")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+	if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeReady, Status: metav1.ConditionFalse, Reason: "SetupPodFinished", Message: "Setup pod has cloned and parsed data"}); err != nil {
+		return ctrl.Result{}, err
+	}
 	// Nothing to do continue
 	return ctrl.Result{}, nil
 }
@@ -361,7 +423,7 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	createFn := func() (ctrl.Result, error) {
-		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningDockerBuild", Message: "Provisioning Docker Build"}); err != nil {
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionUnknown, Reason: "ProvisioningOCIBuild", Message: "Provisioning Docker Build"}); err != nil {
 			log.Info("Failed to update status during Kaniko pod setup")
 			return ctrl.Result{}, err
 		}
@@ -378,7 +440,7 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 			} else {
 				log.Error(err, "Failed to create parse Kaniko pod")
-				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "ProvisioningDockerBuildErr", Message: err.Error()}); err != nil {
+				if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "ProvisioningOCIBuildErr", Message: err.Error()}); err != nil {
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{}, err
@@ -396,7 +458,7 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 			return createFn()
 		} else {
 			log.Error(err, "Failed to get Kaniko pod info")
-			return ctrl.Result{}, err
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, err
 		}
 	}
 	podDefinitionID := GetDefinitionIDLabel(kanikoJob)
@@ -413,7 +475,13 @@ func (r *DefinitionReconciler) ensureKanikoJob(ctx context.Context, instance *de
 	}
 	if !JobIsCompleted(kanikoJob) {
 		log.Info("Kaniko pod is not ready")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionFalse, Reason: "RunningOCIBuild", Message: "OCI Image Build in progress"}); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeBuilt, Status: metav1.ConditionTrue, Reason: "FinishedOCIBuild", Message: "OCI Image Build finished"}); err != nil {
+		return ctrl.Result{}, err
 	}
 	// Nothing to do continue
 	return ctrl.Result{}, nil
@@ -691,6 +759,11 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 	},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"devcontainerJobRunner": "setup",
+					},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: UtilServiceAccountName,
 					Containers: []corev1.Container{
@@ -733,7 +806,57 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 	return job, nil
 }
 
+func kanikoImageRef(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace) string {
+	return fmt.Sprintf("%s/%s:%s", workspace.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash)
+}
+
 func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, workspace *devcontainerv1alpha1.Workspace, definitionID string, pvcName string) (*batchv1.Job, error) {
+	volumes := []corev1.Volume{
+		{
+			Name: pvcName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvcName,
+				},
+			},
+		},
+	}
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      pvcName,
+			MountPath: "/workspace",
+		},
+	}
+	if workspace.Spec.RegistryCredentials != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "docker-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: workspace.Spec.RegistryCredentials,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  ".dockerconfigjson",
+							Path: "config.json",
+						},
+					},
+				},
+			},
+		},
+		)
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "docker-secret",
+			MountPath: "/kaniko/.docker",
+		})
+	}
+	args := []string{
+		// dockerfile is inside the context.tgz
+		"--context=tar:///workspace/.docker_context/context.tgz",
+		"--destination=" + kanikoImageRef(inst, workspace),
+	}
+	if workspace.Spec.UseInsecureRegistry() {
+		args = append(args, "--insecure")
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.kanikoJobName(inst),
@@ -744,50 +867,15 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "kaniko",
-							Image: "gcr.io/kaniko-project/executor:latest",
-							Args: []string{
-								fmt.Sprintf("--dockerfile=%s", inst.Parsed.Build.Dockerfile),
-								"--context=dir://workspace",
-								fmt.Sprintf("--destination=%s/%s:%s", workspace.Spec.ContainerRegistry, inst.Name, inst.Parsed.GitHash),
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "docker-secret",
-									MountPath: "/kaniko/.docker",
-								},
-								{
-									Name:      pvcName,
-									MountPath: "/workspace",
-								},
-							},
+							Name: "kaniko",
+							// TODO(juf): We should not use latest + make this configurable
+							Image:        "gcr.io/kaniko-project/executor:latest",
+							Args:         args,
+							VolumeMounts: volumeMounts,
 						},
 					},
 					RestartPolicy: corev1.RestartPolicyNever,
-					Volumes: []corev1.Volume{
-						{
-							Name: "docker-secret",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: workspace.Spec.RegistryCredentials,
-									Items: []corev1.KeyToPath{
-										{
-											Key:  ".dockerconfigjson",
-											Path: "config.json",
-										},
-									},
-								},
-							},
-						},
-						{
-							Name: pvcName,
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: pvcName,
-								},
-							},
-						},
-					},
+					Volumes:       volumes,
 				},
 			},
 		},
@@ -849,7 +937,8 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definition, definitionID string) corev1.Container {
 	pvcName := WorkspacePVCName(inst)
 	return corev1.Container{
-		Name: "parser",
+		Name:            "parser",
+		ImagePullPolicy: corev1.PullAlways,
 		// TODO (juf): make configurable
 		Image: PARSERAPP_IMAGE_NAME,
 		Args: []string{

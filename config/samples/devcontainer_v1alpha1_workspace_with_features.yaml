@@ -1,13 +1,13 @@
 apiVersion: devcontainer.everproc.com/v1alpha1
 kind: Workspace
 metadata:
+  name: workspace-with-features
   labels:
     app.kubernetes.io/name: devcontainer
     app.kubernetes.io/managed-by: kustomize
-  name: workspace-sample
 spec:
-  owner: john
-  gitHashOrTag: master
-  gitUrl: "https://github.com/daemonfire300/sample-jupyter-devcontainer.git"
+  owner: test-user
+  gitHashOrTag: main
+  gitUrl: "https://github.com/devcontainers/template-starter"
   containerRegistry: "kind-registry:5000"
   insecureContainerRegistry: "true"

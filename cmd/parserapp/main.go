@@ -23,24 +23,9 @@ import (
 	"github.com/tailscale/hujson"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
+	"everproc.com/devcontainer/internal/features"
 	"everproc.com/devcontainer/internal/parsing"
 )
-
-func logDir(ctx context.Context, dir string) {
-	logger, err := logr.FromContext(ctx)
-	if err != nil {
-		panic(err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		logger.Error(err, "Could not read dir", "dir", dir)
-		return
-	}
-	logger.Info(fmt.Sprintf("Listing entries for %s", dir))
-	for _, e := range entries {
-		logger.Info(fmt.Sprintf("Entry: %s (dir:%t)", e.Name(), e.IsDir()))
-	}
-}
 
 var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version +
 	"." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
@@ -62,8 +47,28 @@ func main() {
 		return
 	}
 	file := os.Args[1]
-	logDir(ctx, ".")
-	logDir(ctx, path.Dir("/workspace"))
+
+	// Debug: Log current directory contents, this was already helpful for debugging.
+	if entries, err := os.ReadDir("."); err == nil {
+		log.Info("Current directory contents", "dir", ".", "entryCount", len(entries))
+		for _, e := range entries {
+			log.Info("Directory entry", "name", e.Name(), "isDir", e.IsDir())
+		}
+	} else {
+		log.Info("Could not read current directory", "error", err)
+	}
+
+	// Debug: Log workspace parent directory contents, see above
+	workspaceParent := path.Dir("/workspace")
+	if entries, err := os.ReadDir(workspaceParent); err == nil {
+		log.Info("Workspace parent directory contents", "dir", workspaceParent, "entryCount", len(entries))
+		for _, e := range entries {
+			log.Info("Directory entry", "name", e.Name(), "isDir", e.IsDir())
+		}
+	} else {
+		log.Info("Could not read workspace parent directory", "dir", workspaceParent, "error", err)
+	}
+
 	for {
 		_, err := os.Stat("/workspace/.tmp/git_status/clone_done")
 		if err != nil {
@@ -91,7 +96,17 @@ func main() {
 		return
 	}
 
-	logDir(ctx, path.Dir(file))
+	// Debug: Log file directory contents
+	fileDir := path.Dir(file)
+	if entries, err := os.ReadDir(fileDir); err == nil {
+		log.Info("File directory contents", "dir", fileDir, "entryCount", len(entries))
+		for _, e := range entries {
+			log.Info("Directory entry", "name", e.Name(), "isDir", e.IsDir())
+		}
+	} else {
+		log.Info("Could not read file directory", "dir", fileDir, "error", err)
+	}
+
 	reader, err := os.Open(file)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("could not open file: %v", err))
@@ -107,15 +122,15 @@ func main() {
 	devContainerSpec := &parsing.DevContainerSpec{}
 	// converts non-conformant JSON to conformant JSON,
 	// e.g., strips comments, fixes trailing commas. For more info see hujson package.
-	data, err := hujson.Standardize(rawData)
+	sanitizedData, err := hujson.Standardize(rawData)
 	if err != nil {
 		log.Error(err, "could not standardize json")
 		os.Exit(-1)
 		return
 	}
 
-	if err := json.Unmarshal(data, &devContainerSpec); err != nil {
-		log.Error(err, "could not parse json", "file", file, "data", string(data))
+	if err := json.Unmarshal(sanitizedData, &devContainerSpec); err != nil {
+		log.Error(err, "could not parse json", "file", file, "data", string(sanitizedData))
 		os.Exit(-1)
 		return
 	}
@@ -143,7 +158,7 @@ func main() {
 		devContainerSpec.Build.Args = make(map[string]string)
 	}
 
-	log.Info("Creating RD with dir and namespace", "name", dir, "namespace", namespace)
+	log.Info("Creating Resource definition with dir and namespace", "name", dir, "namespace", namespace)
 
 	// Step 3: Initialize a Kubernetes client
 	config, err := rest.InClusterConfig()
@@ -180,10 +195,14 @@ func main() {
 		}
 	}
 	log.Info(fmt.Sprintf("Spec has %d ports", len(ports)))
-	rawData, err = json.Marshal(devContainerSpec)
-	if err != nil {
-		log.Error(err, "Failed to marshal spec")
-		os.Exit(1)
+	featureList := []string{}
+	for _, ft := range devContainerSpec.Features.Features {
+		opts, err := json.Marshal(ft.Options)
+		if err != nil {
+			log.Error(err, "Failed to marshal feature option map", "feature", ft.Ref.String())
+			os.Exit(1)
+		}
+		featureList = append(featureList, fmt.Sprintf("( %q ( %s ))", ft.Ref.String(), opts))
 	}
 
 	targetDefinition.GenerateName = k8sResourceName + "-" // Set the name of the resource
@@ -195,7 +214,7 @@ func main() {
 			Args: orEmptySlice(devContainerSpec.RunArgs),
 		},
 		GitHash:       strings.TrimSpace(string(gitHashRaw)),
-		RawDefinition: string(rawData),
+		RawDefinition: string(sanitizedData),
 		PodTpl: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
@@ -207,6 +226,7 @@ func main() {
 				},
 			},
 		},
+		Features: featureList,
 	}
 	if devContainerSpec.Image != "" {
 		parsedDefinition.PodTpl.Spec.Containers[0].Image = devContainerSpec.Image
@@ -216,6 +236,25 @@ func main() {
 	if err != nil {
 		log.Error(err, "Failed to json.Marshal ParsedData")
 		os.Exit(1)
+	}
+
+	// TODO(juf): Make this a constant so we do not have this dir string in multiple locations
+	ctxFilePath, err := features.Prepare(ctx, devContainerSpec, "/workspace")
+	if err != nil {
+		log.Error(err, "Failed to prepare oci image context")
+		os.Exit(1)
+	}
+	log.Info("Written oci image context", "path", ctxFilePath)
+
+	// Debug: Log OCI context directory contents
+	ctxDir := path.Dir(ctxFilePath)
+	if entries, err := os.ReadDir(ctxDir); err == nil {
+		log.Info("OCI context directory contents", "dir", ctxDir, "entryCount", len(entries))
+		for _, e := range entries {
+			log.Info("Directory entry", "name", e.Name(), "isDir", e.IsDir())
+		}
+	} else {
+		log.Info("Could not read OCI context directory", "dir", ctxDir, "error", err)
 	}
 
 	if err := kubeClient.Create(ctx, targetDefinition); err != nil {

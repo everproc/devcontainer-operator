@@ -42,11 +42,17 @@ type WorkspaceSpec struct {
 	// +kubebuilder:printcolumn:JSONPath="spec.registryCredentials",name=RegistryCredentials,type=string
 	RegistryCredentials string `json:"registryCredentials"`
 	// +kubebuilder:validation:Optional
+	InsecureContainerRegistry bool `json:"insecureContainerRegistry"`
+	// +kubebuilder:validation:Optional
 	// The storage class that is used for PVC creation.
 	StorageClassName string `json:"storageClassName"`
 	// +kubebuilder:validation:Optional
 	// The owner of this workspace
 	Owner string `json:"owner"`
+}
+
+func (w WorkspaceSpec) UseInsecureRegistry() bool {
+	return w.InsecureContainerRegistry
 }
 
 const (
