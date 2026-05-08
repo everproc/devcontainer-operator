@@ -130,7 +130,7 @@ func (f *Feature) Name() string {
 }
 
 func (f *Feature) ID() string {
-	s := []string{}
+	s := make([]string, 0, len(f.Config.Options))
 	for k := range f.Config.Options {
 		s = append(s, k)
 	}
@@ -169,7 +169,7 @@ func mergeOptions(user map[string]any, feature parsing.FeatureSpecOptionList) ma
 	// I changed my stance on this: I will now throw a panic now
 	// Felt right, might change later
 	uKeys := slices.Collect(maps.Keys(user))
-	fKeys := []string{}
+	fKeys := make([]string, 0, len(feature.Options))
 	for fk, fv := range feature.Options {
 		uv, ok := user[fk]
 		if !ok && fv.Default != "" {

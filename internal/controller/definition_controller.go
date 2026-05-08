@@ -45,9 +45,13 @@ import (
 	"everproc.com/devcontainer/internal/controller/state"
 )
 
-const UtilRoleName = "devcontainer-utility"
-const UtilRoleBindingName = UtilRoleName
-const UtilServiceAccountName = UtilRoleName
+const (
+	UtilRoleName             = "devcontainer-utility"
+	UtilRoleBindingName      = UtilRoleName
+	UtilServiceAccountName   = UtilRoleName
+	VolumeNameGitSecret      = "git-secret"
+	VolumeMountPathWorkspace = "/workspace"
+)
 
 var LabelDefinitionMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/definitionID"
 var LabelWorkspaceMapKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/workspaceName"
@@ -787,7 +791,7 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 	}
 	if workspace.Spec.GitSecret != "" {
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
-			Name: "git-secret",
+			Name: VolumeNameGitSecret,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  workspace.Spec.GitSecret,
@@ -824,7 +828,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 	volumeMounts := []corev1.VolumeMount{
 		{
 			Name:      pvcName,
-			MountPath: "/workspace",
+			MountPath: VolumeMountPathWorkspace,
 		},
 	}
 	if workspace.Spec.RegistryCredentials != "" {
@@ -920,13 +924,13 @@ func (r *DefinitionReconciler) gitCloneContainer(inst *devcontainerv1alpha1.Defi
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      pvcName,
-				MountPath: "/workspace",
+				MountPath: VolumeMountPathWorkspace,
 			},
 		},
 	}
 	if workspace.Spec.GitSecret != "" {
 		cloneContainer.VolumeMounts = append(cloneContainer.VolumeMounts, corev1.VolumeMount{
-			Name:      "git-secret",
+			Name:      VolumeNameGitSecret,
 			MountPath: "/root/.ssh",
 			ReadOnly:  true,
 		})
@@ -962,7 +966,7 @@ func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definit
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      pvcName,
-				MountPath: "/workspace",
+				MountPath: VolumeMountPathWorkspace,
 			},
 		},
 	}
@@ -972,7 +976,7 @@ func (r *DefinitionReconciler) parseContainer(inst *devcontainerv1alpha1.Definit
 func (r *DefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.ConfigMap{}, "metadata.ownerReferences.kind", func(obj client.Object) []string {
 		cm := obj.(*corev1.ConfigMap)
-		var kinds []string
+		kinds := make([]string, 0, len(cm.OwnerReferences))
 		for _, owner := range cm.OwnerReferences {
 			kinds = append(kinds, owner.Kind)
 		}
@@ -983,7 +987,7 @@ func (r *DefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.ConfigMap{}, "metadata.ownerReferences.name", func(obj client.Object) []string {
 		cm := obj.(*corev1.ConfigMap)
-		var names []string
+		names := make([]string, 0, len(cm.OwnerReferences))
 		for _, owner := range cm.OwnerReferences {
 			names = append(names, owner.Name)
 		}

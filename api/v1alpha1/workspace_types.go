@@ -56,8 +56,9 @@ func (w WorkspaceSpec) UseInsecureRegistry() bool {
 }
 
 const (
-	WorkspaceCondTypeInUse = "InUse"
-	WorkspaceCondTypeReady = "Ready"
+	WorkspaceCondTypeInUse        = "InUse"
+	WorkspaceCondTypeReady        = "Ready"
+	WorkspaceCondReasonNotStarted = "NotStarted"
 )
 
 func InitialConditionsWorkspace() []metav1.Condition {
@@ -65,12 +66,12 @@ func InitialConditionsWorkspace() []metav1.Condition {
 		{
 			Type:   WorkspaceCondTypeInUse,
 			Status: metav1.ConditionUnknown,
-			Reason: "NotStarted",
+			Reason: WorkspaceCondReasonNotStarted,
 		},
 		{
 			Type:   WorkspaceCondTypeReady,
 			Status: metav1.ConditionUnknown,
-			Reason: "NotStarted",
+			Reason: WorkspaceCondReasonNotStarted,
 		},
 	}
 }
