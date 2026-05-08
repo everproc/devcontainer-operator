@@ -1,6 +1,6 @@
 module everproc.com/devcontainer
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/go-git/go-git/v6 v6.0.0-20250701074610-5d6af409877b
