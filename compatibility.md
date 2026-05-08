@@ -51,7 +51,7 @@ This page documents devcontainer standard supported by the devcontainer-operator
 | `onCreateCommand` | |
 | `updateContentCommand` | |
 | `postCreateCommand` | :white_check_mark: |
-| `postStartCommand` | |
+| `postStartCommand` | :white_check_mark: |
 | `postAttachCommand` | |
 | `waitFor` | |
 
