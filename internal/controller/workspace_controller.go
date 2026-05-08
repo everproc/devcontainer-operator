@@ -488,10 +488,33 @@ func (r *WorkspaceReconciler) injectMounts(tpl *corev1.PodTemplateSpec, mountPVC
 	}
 }
 
-// This is done to prevent the container from exiting and make sure the default dir is the workspace
-func injectContainerOverwrites(tpl *corev1.PodTemplateSpec) {
+// injectContainerOverwrites sets the container command (sleep infinity) and working directory.
+// If a postStartCommand is defined it is injected as a postStart lifecycle hook, which Kubernetes
+// runs inside the container immediately after it starts — matching devcontainer spec semantics
+// (postStartCommand runs on every container start).
+func injectContainerOverwrites(tpl *corev1.PodTemplateSpec, data *parsing.DevContainerSpec) {
 	tpl.Spec.Containers[0].Command = []string{"/bin/sh", "-c", "sleep infinity"}
 	tpl.Spec.Containers[0].WorkingDir = "/workspace"
+
+	if data.PostStartCommand == nil {
+		return
+	}
+	var command []string
+	if len(data.PostStartCommand.Array) > 0 {
+		command = data.PostStartCommand.Array
+	} else if data.PostStartCommand.String != "" {
+		// Wrap string form in a shell so that shell syntax (pipes, semicolons) works,
+		// matching devcontainer spec behaviour.
+		command = []string{"/bin/sh", "-c", data.PostStartCommand.String}
+	}
+	if len(command) == 0 {
+		return
+	}
+	tpl.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{
+		PostStart: &corev1.LifecycleHandler{
+			Exec: &corev1.ExecAction{Command: command},
+		},
+	}
 }
 
 func isDeploymentReady(depl *appsv1.Deployment) bool {
@@ -616,7 +639,7 @@ func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Worksp
 	if data.Build.Dockerfile != "" {
 		r.injectImage(def, inst, tpl)
 	}
-	injectContainerOverwrites(tpl)
+	injectContainerOverwrites(tpl, &data)
 	depl := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: appsv1.SchemeGroupVersion.String(),
