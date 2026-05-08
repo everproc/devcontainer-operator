@@ -72,6 +72,7 @@ const (
 	DefinitionCondTypeParsed       = "Parsed"
 	DefinitionCondTypeBuilt        = "Built"
 	DefinitionCondTypeRemoteCloned = "RemoteCloned"
+	DefinitionCondReasonNotStarted = "NotStarted"
 )
 
 func InitialConditionsDefinition() []metav1.Condition {
@@ -79,17 +80,17 @@ func InitialConditionsDefinition() []metav1.Condition {
 		{
 			Type:   DefinitionCondTypeReady,
 			Status: metav1.ConditionUnknown,
-			Reason: "NotStarted",
+			Reason: DefinitionCondReasonNotStarted,
 		},
 		{
 			Type:   DefinitionCondTypeParsed,
 			Status: metav1.ConditionUnknown,
-			Reason: "NotStarted",
+			Reason: DefinitionCondReasonNotStarted,
 		},
 		{
 			Type:   DefinitionCondTypeRemoteCloned,
 			Status: metav1.ConditionUnknown,
-			Reason: "NotStarted",
+			Reason: DefinitionCondReasonNotStarted,
 		},
 	}
 }

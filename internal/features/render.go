@@ -9,7 +9,7 @@ func RenderInstallationOrder[T id](lst []*Node[T]) string {
 	sb := strings.Builder{}
 	i := len(lst)
 	for _, n := range lst {
-		sb.WriteString(fmt.Sprintf("%s [%s]\n", n.Data.Name(), n.ID()))
+		sb.WriteString(fmt.Sprintf("%s [%s]\n", n.Data.Name(), n.ID())) //nolint:staticcheck
 		i--
 		if i > 0 {
 			sb.WriteString("|\n")
@@ -29,7 +29,7 @@ func RenderAsciiGraph[T id](root *Node[T]) string {
 	visited := make(map[string]struct{}) // To track visited node IDs
 
 	// Print the root node
-	sb.WriteString(fmt.Sprintf("[%s]\n", root.Data.Name()))
+	sb.WriteString(fmt.Sprintf("[%s]\n", root.Data.Name())) //nolint:staticcheck
 	visited[root.Data.ID()] = struct{}{}
 
 	// Recursively print children of the root

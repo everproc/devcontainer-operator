@@ -53,6 +53,8 @@ import (
 	"everproc.com/devcontainer/internal/parsing"
 )
 
+const AppName = "devcontainer"
+
 var WorkspacePodLabelKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/workspaceRef"
 var WorkspaceDeploymentExecutedPostCreateAnnotationKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/executedPostCreate"
 
@@ -126,7 +128,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	definitionID := definitionID(instance)
 	defList := &devcontainerv1alpha1.DefinitionList{}
 	err = r.List(ctx, defList, client.MatchingLabels{
-		"app.kubernetes.io/name": "devcontainer",
+		"app.kubernetes.io/name": AppName,
 		LabelDefinitionMapKey:    definitionID,
 		LabelWorkspaceMapKey:     instance.Name,
 	})
@@ -140,7 +142,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		def.Name = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", instance.Name))
 		def.Namespace = instance.Namespace
 		def.Labels = map[string]string{
-			"app.kubernetes.io/name": "devcontainer",
+			"app.kubernetes.io/name": AppName,
 			LabelDefinitionMapKey:    definitionID,
 			LabelWorkspaceMapKey:     instance.Name,
 		}
@@ -429,7 +431,7 @@ func (r *WorkspaceReconciler) injectWorkspace(pvcName, gitUrl, gitDomain, gitHas
 	volumeMounts := []corev1.VolumeMount{
 		{
 			Name:      pvcName,
-			MountPath: "/workspace",
+			MountPath: VolumeMountPathWorkspace,
 		},
 	}
 	tpl.Spec.Containers[0].VolumeMounts = volumeMounts
@@ -494,7 +496,7 @@ func (r *WorkspaceReconciler) injectMounts(tpl *corev1.PodTemplateSpec, mountPVC
 // (postStartCommand runs on every container start).
 func injectContainerOverwrites(tpl *corev1.PodTemplateSpec, data *parsing.DevContainerSpec) {
 	tpl.Spec.Containers[0].Command = []string{"/bin/sh", "-c", "sleep infinity"}
-	tpl.Spec.Containers[0].WorkingDir = "/workspace"
+	tpl.Spec.Containers[0].WorkingDir = VolumeMountPathWorkspace
 
 	if data.PostStartCommand == nil {
 		return
@@ -527,7 +529,7 @@ func isDeploymentReady(depl *appsv1.Deployment) bool {
 func (r *WorkspaceReconciler) parseAndExecPostCreationCommands(ctx context.Context, inst *devcontainerv1alpha1.Workspace, def *devcontainerv1alpha1.Definition) error {
 	log := log.FromContext(ctx)
 	selectorLabels := map[string]string{
-		"app":          "devcontainer",
+		"app":          AppName,
 		"definitionID": GetDefinitionIDLabel(def),
 	}
 	pods := &corev1.PodList{}
@@ -611,7 +613,7 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 
 func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
-		"app":          "devcontainer",
+		"app":          AppName,
 		"definitionID": definitionID,
 	}
 	selector := metav1.LabelSelector{
@@ -685,7 +687,7 @@ func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Obj
 func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, "metadata.ownerReferences.kind", func(obj client.Object) []string {
 		cm := obj.(*appsv1.Deployment)
-		var kinds []string
+		kinds := make([]string, 0, len(cm.OwnerReferences))
 		for _, owner := range cm.OwnerReferences {
 			kinds = append(kinds, owner.Kind)
 		}
@@ -696,7 +698,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, "metadata.ownerReferences.name", func(obj client.Object) []string {
 		cm := obj.(*appsv1.Deployment)
-		var names []string
+		names := make([]string, 0, len(cm.OwnerReferences))
 		for _, owner := range cm.OwnerReferences {
 			names = append(names, owner.Name)
 		}
