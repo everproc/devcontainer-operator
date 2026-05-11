@@ -14,7 +14,21 @@ The basic installation creates the `devcontainer-operator` namespace with all re
 kubectl create -f https://raw.githubusercontent.com/everproc/devcontainer-operator/main/dist/install.yaml
 ```
 
-Once the operator is running, create a Workspace CR with a git repository URL that contains a [devcontainer.json](https://containers.dev/).
+Once the operator is running, create a K8s secret to enable the operator to push to your private registry.
+
+```
+kubectl create secret generic docker-secret \
+    --from-file=.dockerconfigjson=<path/to/.docker/config.json \
+    --type=kubernetes.io/dockerconfigjson
+```
+
+Add the image pull secret to the service account, so that K8s can pull the new image from your private registry.
+
+```
+kubectl patch serviceaccount default -p '{"imagePullSecrets": [{"name": "docker-secret"}]}'
+```
+
+Now create Workspace CR with a git repository URL that contains a [devcontainer.json](https://containers.dev/)
 
 ```
 apiVersion: devcontainer.everproc.com/v1alpha1
@@ -24,6 +38,8 @@ metadata:
 spec:
   gitUrl: https://github.com/devcontainers/template-starter
   gitHashOrTag: main
+  containerRegistry: "your-private-registry-url"
+  registryCredentials: "docker-secret"
 ```
 
 Depending on your `devcontainer.json` specified IDE you can exec into the workspace container or connect your IDE over SSH or other protocols.
