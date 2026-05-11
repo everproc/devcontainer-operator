@@ -1,7 +1,7 @@
 # Image URL to use all building/pushing image targets
 REGISTRY ?= ghcr.io
 REPOSITORY ?= everproc/devcontainer-operator
-IMG_TAG ?= 0.0.7
+IMG_TAG ?= 0.0.8
 IMG ?= $(REGISTRY)/$(REPOSITORY):$(IMG_TAG)
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
