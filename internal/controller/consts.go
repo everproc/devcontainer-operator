@@ -21,6 +21,6 @@ func init() {
 
 	KANIKO_IMAGE_NAME = os.Getenv("KANIKO_IMAGE_NAME")
 	if KANIKO_IMAGE_NAME == "" {
-		KANIKO_IMAGE_NAME = "gcr.io/kaniko-project/executor:latest"
+		KANIKO_IMAGE_NAME = "everproc/kaniko-executor:v1.25.14"
 	}
 }
