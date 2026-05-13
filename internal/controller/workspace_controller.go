@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -232,6 +233,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Info("Deployment is not ready yet")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
+		if err := r.ensureServices(ctx, instance, &def); err != nil {
+			log.Error(err, "Failed to create Services")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		log.Info("Deployment ready, let's execute any PostCreationCommands")
 		v, ok := currentDeployment.Annotations[WorkspaceDeploymentExecutedPostCreateAnnotationKey]
 		if !ok || v == "false" {
@@ -344,6 +349,54 @@ func (r *WorkspaceReconciler) ensureMountPVCs(ctx context.Context, def *devconta
 		}
 	}
 	return pvcs, nil
+}
+
+// ensureServices reconciles the creation of services that should be auto-created to match the ports
+// defined in the devcontainer.json
+func (r *WorkspaceReconciler) ensureServices(ctx context.Context, inst *devcontainerv1alpha1.Workspace, def *devcontainerv1alpha1.Definition) error {
+	log := log.FromContext(ctx)
+	labels := map[string]string{
+		LabelDefinitionMapKey: GetDefinitionIDLabel(inst),
+		WorkspacePodLabelKey:  inst.Name,
+	}
+	// Rust or OCaml would be cool here
+	desiredServicePorts := def.Spec.RuntimePodTpl.Spec.Containers[0].Ports
+	if len(desiredServicePorts) == 0 {
+		log.V(5).Info("No ports set", "namespace", inst.Namespace, "name", inst.GetName())
+		return nil
+	}
+	svcList := &corev1.ServiceList{}
+	if err := r.List(ctx, svcList, client.MatchingLabels(labels)); err != nil {
+		log.Error(err, "Failed to query for existing PVCs")
+		return nil
+	}
+
+	servicePorts := []corev1.ServicePort{}
+	for idx, port := range desiredServicePorts {
+		servicePorts = append(servicePorts, corev1.ServicePort{
+			Name:       fmt.Sprintf("p%d", idx),
+			Port:       UnprivilegedPort(port.ContainerPort),
+			TargetPort: intstr.FromInt32(UnprivilegedPort(port.ContainerPort)),
+		})
+	}
+	svcName := names.SimpleNameGenerator.GenerateName("wkspce-")
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svcName,
+			Namespace: inst.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Ports:    servicePorts,
+			Selector: labels,
+		}}
+	if err := ctrl.SetControllerReference(inst, svc, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Create(ctx, svc); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *WorkspaceReconciler) ensureWorkspacePVC(ctx context.Context, inst *devcontainerv1alpha1.Workspace) (*corev1.PersistentVolumeClaim, error) {
