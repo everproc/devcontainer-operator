@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -44,8 +45,10 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
 	"everproc.com/devcontainer/internal/controller/conditions"
@@ -110,6 +113,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	if instance.Status.ObservedGeneration == instance.Generation && conditions.IsTrue(devcontainerv1alpha1.WorkspaceCondTypeReady, instance.Status.Conditions) {
+		log.Info("Workspace already fully reconciled for this generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	if len(instance.Status.Conditions) == 0 {
 		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 			log.Error(err, "Failed to re-fetch Workspace")
@@ -119,7 +127,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			instance.Spec.Owner = instance.Name
 		}
 		meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		if err = r.Status().Update(ctx, instance); err != nil {
+		if err = r.updateWorkspaceStatus(ctx, req.NamespacedName, instance); err != nil {
 			log.Error(err, "Failed to update Workspace status")
 			return ctrl.Result{}, err
 		}
@@ -262,8 +270,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	meta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{Type: devcontainerv1alpha1.WorkspaceCondTypeReady,
 		Status: metav1.ConditionTrue, Reason: "ReconcileFinished",
 		Message: fmt.Sprintf("Workspace for custom resource (%s) created successfully", instance.Name)})
+	instance.Status.ObservedGeneration = instance.Generation
 
-	if err := r.Status().Update(ctx, instance); err != nil {
+	if err := r.updateWorkspaceStatus(ctx, req.NamespacedName, instance); err != nil {
 		log.Error(err, "Failed to update Workspace status")
 		return ctrl.Result{}, err
 	}
@@ -663,6 +672,27 @@ func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Worksp
 	return depl, nil
 }
 
+func (r *WorkspaceReconciler) updateWorkspaceStatus(ctx context.Context, name types.NamespacedName, instance *devcontainerv1alpha1.Workspace) error {
+	log := log.FromContext(ctx)
+	var err error
+	for i := range 3 {
+		err = r.Status().Update(ctx, instance)
+		if err == nil {
+			return nil
+		}
+		if apierrors.IsConflict(err) {
+			log.Error(err, "Failed to update Workspace status due to conflict, retrying", "retry", i)
+			if refetchErr := r.Get(ctx, name, instance); refetchErr != nil {
+				log.Error(refetchErr, "Failed to re-fetch Workspace during conflict retry")
+				return refetchErr
+			}
+			continue
+		}
+		return err
+	}
+	return err
+}
+
 func (r *WorkspaceReconciler) ensureResource(ctx context.Context, obj client.Object) error {
 	key := client.ObjectKeyFromObject(obj)
 
@@ -708,7 +738,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&devcontainerv1alpha1.Workspace{}).
-		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("workspace").
 		Complete(r)
 }
