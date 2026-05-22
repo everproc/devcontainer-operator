@@ -183,6 +183,35 @@ spec:
 				g.Expect(output).NotTo(BeEmpty(), "Deployment should exist")
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
+			By("verifying service was created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "-n", featuresTestNamespace)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("wkspce-"), "Service should exist")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying service exposes the correct port")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "-n", featuresTestNamespace, "-o", "jsonpath={.items[?(@.spec.ports[0].port==8888)].metadata.name}")
+				svcName, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(svcName).NotTo(BeEmpty(), "Service should expose port 8888")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying service has endpoints (routes to pods)")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "-n", featuresTestNamespace, "-o", "jsonpath={.items[?(@.spec.ports[0].port==8888)].metadata.name}")
+				svcName, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(svcName).NotTo(BeEmpty())
+
+				cmd = exec.Command("kubectl", "get", "endpoints", svcName, "-n", featuresTestNamespace, "-o", "jsonpath={.subsets[0].addresses[0].ip}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Service should have endpoints (route to pods)")
+			}, 3*time.Minute, 10*time.Second).Should(Succeed())
+
 			By("checking that the workspace completed successfully")
 			format := "jsonpath={.status.conditions[?(@.type=='Ready')].message}"
 			cmd = exec.Command("kubectl", "get", "workspace", workspaceName, "-n", featuresTestNamespace, "-o", format)

@@ -364,9 +364,10 @@ func (r *WorkspaceReconciler) ensureMountPVCs(ctx context.Context, def *devconta
 // defined in the devcontainer.json
 func (r *WorkspaceReconciler) ensureServices(ctx context.Context, inst *devcontainerv1alpha1.Workspace, def *devcontainerv1alpha1.Definition) error {
 	log := log.FromContext(ctx)
+	defID := definitionID(inst)
 	labels := map[string]string{
-		LabelDefinitionMapKey: GetDefinitionIDLabel(inst),
-		WorkspacePodLabelKey:  inst.Name,
+		"app":          AppName,
+		"definitionID": defID,
 	}
 	// Rust or OCaml would be cool here
 	desiredServicePorts := def.Spec.RuntimePodTpl.Spec.Containers[0].Ports
@@ -376,7 +377,11 @@ func (r *WorkspaceReconciler) ensureServices(ctx context.Context, inst *devconta
 	}
 	svcList := &corev1.ServiceList{}
 	if err := r.List(ctx, svcList, client.MatchingLabels(labels)); err != nil {
-		log.Error(err, "Failed to query for existing PVCs")
+		log.Error(err, "Failed to query for existing Services")
+		return nil
+	}
+	if len(svcList.Items) > 0 {
+		log.V(5).Info("Service already exists", "namespace", inst.Namespace, "name", inst.GetName())
 		return nil
 	}
 
