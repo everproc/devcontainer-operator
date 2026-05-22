@@ -48,6 +48,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -88,6 +89,7 @@ func DefinitionFinalizerForRelatedWorkspaces() (string, func(ctx context.Context
 // +kubebuilder:rbac:groups=devcontainer.everproc.com,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=devcontainer.everproc.com,resources=workspaces/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=devcontainer.everproc.com,resources=workspaces/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -97,9 +99,23 @@ func DefinitionFinalizerForRelatedWorkspaces() (string, func(ctx context.Context
 // the user.
 //
 // For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/reconcile
+func (r *WorkspaceReconciler) updateWorkspaceCondition(ctx context.Context, req ctrl.Request, instance *devcontainerv1alpha1.Workspace, condition metav1.Condition) error {
+	log := log.FromContext(ctx)
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+		log.Error(err, "Failed to re-fetch Workspace for condition update")
+		return err
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, condition)
+	if err := r.updateWorkspaceStatus(ctx, req.NamespacedName, instance); err != nil {
+		log.Error(err, "Failed to update Workspace status")
+		return err
+	}
+	return nil
+}
+
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
+	log.Info("Workspace reconcile starting", "name", req.Name, "namespace", req.Namespace)
 
 	instance := &devcontainerv1alpha1.Workspace{}
 	err := r.Get(ctx, req.NamespacedName, instance)
@@ -120,10 +136,6 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if len(instance.Status.Conditions) == 0 {
-		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
-			log.Error(err, "Failed to re-fetch Workspace")
-			return ctrl.Result{}, err
-		}
 		if instance.Spec.Owner == "" {
 			instance.Spec.Owner = instance.Name
 		}
@@ -182,14 +194,24 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if !conditions.IsTrue(devcontainerv1alpha1.DefinitionCondTypeReady, def.Status.Conditions) {
 		// Definition is not ready yet
 		log.Info("Definition is not in a ready state yet", "definition name", def.Name)
+		if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
+			Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
+			Status:  metav1.ConditionUnknown,
+			Reason:  "WaitingForDefinition",
+			Message: fmt.Sprintf("Waiting for Definition %s to be ready", def.Name),
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	ownedDeployments := &appsv1.DeploymentList{}
 	// Let's hope this works.
 	// Why are we doing this?
 	// We want to remove any outdated deployments when the definitionID changes
+	// BUGFIX: instance.Kind is not populated by controller-runtime's typed client,
+	// so we hardcode "Workspace" here instead.
 	err = r.List(ctx, ownedDeployments, client.MatchingFields{
-		"metadata.ownerReferences.kind": instance.Kind,
+		"metadata.ownerReferences.kind": "Workspace",
 		"metadata.ownerReferences.name": instance.Name,
 	})
 	if err != nil {
@@ -211,6 +233,18 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to create additional mount PVCs")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
+		if def.Spec.RuntimePodTpl == nil {
+			log.Info("Definition RuntimePodTpl is not yet available, requeueing", "definition", def.Name)
+			if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
+				Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "WaitingForDefinition",
+				Message: fmt.Sprintf("Definition %s is ready but RuntimePodTpl is not yet available", def.Name),
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
 		depl, err := r.createDeployment(instance, def.Spec.RuntimePodTpl, &def, definitionID, pvc.Name, mountPVCs)
 		if err != nil {
 			log.Error(err, "Failed to create deployment yaml")
@@ -220,25 +254,42 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+		if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
+			Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
+			Status:  metav1.ConditionUnknown,
+			Reason:  "WaitingForDeployment",
+			Message: "Deployment created, waiting for it to be ready",
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		// we requeue after the deployment is there
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 	} else if len(ownedDeployments.Items) >= 1 {
-		for _, d := range ownedDeployments.Items {
-			id := GetDefinitionIDLabel(&d)
+		for i := range ownedDeployments.Items {
+			d := &ownedDeployments.Items[i]
+			id := GetDefinitionIDLabel(d)
 			if id == "" || id != definitionID {
-				err = r.Delete(ctx, &d)
+				err = r.Delete(ctx, d)
 				if err != nil {
 					log.Error(err, "Failed to delete old deployment", "deploymentName", d.Name)
 					return ctrl.Result{}, err
 				}
 			} else {
-				currentDeployment = &d
+				currentDeployment = d
 			}
 		}
 	}
 	if currentDeployment != nil {
 		if !isDeploymentReady(currentDeployment) {
 			log.Info("Deployment is not ready yet")
+			if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
+				Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "WaitingForDeployment",
+				Message: fmt.Sprintf("Deployment %s not ready yet (replicas: %d/%d)", currentDeployment.Name, currentDeployment.Status.ReadyReplicas, *currentDeployment.Spec.Replicas),
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 		if err := r.ensureServices(ctx, instance, &def); err != nil {
@@ -263,6 +314,14 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	} else {
 		log.Info("Deployment not there yet, waiting")
+		if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
+			Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
+			Status:  metav1.ConditionUnknown,
+			Reason:  "WaitingForDeployment",
+			Message: "Deployment not found yet, waiting for it to appear",
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -378,7 +437,7 @@ func (r *WorkspaceReconciler) ensureServices(ctx context.Context, inst *devconta
 	svcList := &corev1.ServiceList{}
 	if err := r.List(ctx, svcList, client.MatchingLabels(labels)); err != nil {
 		log.Error(err, "Failed to query for existing Services")
-		return nil
+		return err
 	}
 	if len(svcList.Items) > 0 {
 		log.V(5).Info("Service already exists", "namespace", inst.Namespace, "name", inst.GetName())
@@ -797,6 +856,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&devcontainerv1alpha1.Workspace{}).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&devcontainerv1alpha1.Definition{}, handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &devcontainerv1alpha1.Workspace{}, handler.OnlyControllerOwner())).
 		Named("workspace").
 		Complete(r)
 }

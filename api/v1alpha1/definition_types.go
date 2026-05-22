@@ -111,7 +111,7 @@ type Definition struct {
 	metav1.ObjectMeta `json:"metadata"`
 
 	Spec   DefinitionSpec   `json:"spec,omitempty"`
-	Parsed ParsedDefinition `json:"pasedDefinition,omitempty"`
+	Parsed ParsedDefinition `json:"parsedDefinition,omitempty"`
 	Status DefinitionStatus `json:"status,omitempty"`
 }
 
