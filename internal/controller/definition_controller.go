@@ -886,7 +886,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 						{
 							Name: "kaniko",
 							// TODO(juf): We should not use latest + make this configurable
-							Image:        "gcr.io/kaniko-project/executor:latest",
+							Image:        KANIKO_IMAGE_NAME,
 							Args:         args,
 							VolumeMounts: volumeMounts,
 						},
