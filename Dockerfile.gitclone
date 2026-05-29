@@ -1,4 +1,5 @@
 FROM alpine/git
+RUN apk add bash
 WORKDIR /tmp
 COPY clone.sh clone.sh
 WORKDIR /workspace
