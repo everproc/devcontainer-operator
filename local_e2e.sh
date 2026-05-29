@@ -1,4 +1,4 @@
-#!/bin/bash
+#!bash
 export CONTAINER_TOOL=${CONTAINER_TOOL:-podman}
 export REGISTRY=localhost:5001
 export REPOSITORY=devcontainer-operator

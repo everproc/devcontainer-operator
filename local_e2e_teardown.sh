@@ -1,4 +1,4 @@
-#!/bin/bash
+#!bash
 set -exo pipefail
 
 CONTAINER_TOOL=${CONTAINER_TOOL:-podman}

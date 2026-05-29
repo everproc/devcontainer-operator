@@ -39,10 +39,14 @@
         { pkgs, ... }:
         {
           default = pkgs.mkShell {
-            buildInputs = [
+            packages = [
               pkgs.go
               pkgs.gopls
               pkgs.golangci-lint
+              pkgs.podman
+              pkgs.kind
+              pkgs.kubectl
+              pkgs.bash
             ];
           };
         }
