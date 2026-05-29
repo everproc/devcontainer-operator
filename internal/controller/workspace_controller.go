@@ -58,7 +58,12 @@ import (
 	"everproc.com/devcontainer/internal/parsing"
 )
 
-const AppName = "devcontainer"
+const (
+	LabelApp                             = "app"
+	LabelDefinitionID                    = "definitionID"
+	AppName                              = "devcontainer"
+	ConditionReasonWaitingForDevelopment = "WaitingForDevelopment"
+)
 
 var WorkspacePodLabelKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/workspaceRef"
 var WorkspaceDeploymentExecutedPostCreateAnnotationKey = devcontainerv1alpha1.SchemeBuilder.GroupVersion.Version + "." + devcontainerv1alpha1.SchemeBuilder.GroupVersion.Group + "/executedPostCreate"
@@ -257,7 +262,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
 			Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
 			Status:  metav1.ConditionUnknown,
-			Reason:  "WaitingForDeployment",
+			Reason:  ConditionReasonWaitingForDevelopment,
 			Message: "Deployment created, waiting for it to be ready",
 		}); err != nil {
 			return ctrl.Result{}, err
@@ -285,7 +290,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
 				Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
 				Status:  metav1.ConditionUnknown,
-				Reason:  "WaitingForDeployment",
+				Reason:  ConditionReasonWaitingForDevelopment,
 				Message: fmt.Sprintf("Deployment %s not ready yet (replicas: %d/%d)", currentDeployment.Name, currentDeployment.Status.ReadyReplicas, *currentDeployment.Spec.Replicas),
 			}); err != nil {
 				return ctrl.Result{}, err
@@ -317,7 +322,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.updateWorkspaceCondition(ctx, req, instance, metav1.Condition{
 			Type:    devcontainerv1alpha1.WorkspaceCondTypeReady,
 			Status:  metav1.ConditionUnknown,
-			Reason:  "WaitingForDeployment",
+			Reason:  ConditionReasonWaitingForDevelopment,
 			Message: "Deployment not found yet, waiting for it to appear",
 		}); err != nil {
 			return ctrl.Result{}, err
@@ -425,8 +430,8 @@ func (r *WorkspaceReconciler) ensureServices(ctx context.Context, inst *devconta
 	log := log.FromContext(ctx)
 	defID := definitionID(inst)
 	labels := map[string]string{
-		"app":          AppName,
-		"definitionID": defID,
+		LabelApp:          AppName,
+		LabelDefinitionID: defID,
 	}
 	// Rust or OCaml would be cool here
 	desiredServicePorts := def.Spec.RuntimePodTpl.Spec.Containers[0].Ports
@@ -655,8 +660,8 @@ func isDeploymentReady(depl *appsv1.Deployment) bool {
 func (r *WorkspaceReconciler) parseAndExecPostCreationCommands(ctx context.Context, inst *devcontainerv1alpha1.Workspace, def *devcontainerv1alpha1.Definition) error {
 	log := log.FromContext(ctx)
 	selectorLabels := map[string]string{
-		"app":          AppName,
-		"definitionID": GetDefinitionIDLabel(def),
+		LabelApp:          AppName,
+		LabelDefinitionID: GetDefinitionIDLabel(def),
 	}
 	pods := &corev1.PodList{}
 	err := r.List(ctx, pods,
@@ -739,8 +744,8 @@ func (r *WorkspaceReconciler) execPostCreationCommand(ctx context.Context, podNa
 
 func (r *WorkspaceReconciler) createDeployment(inst *devcontainerv1alpha1.Workspace, tpl *corev1.PodTemplateSpec, def *devcontainerv1alpha1.Definition, definitionID, pvcName string, mountPVCs []*corev1.PersistentVolumeClaim) (*appsv1.Deployment, error) {
 	selectorLabels := map[string]string{
-		"app":          AppName,
-		"definitionID": definitionID,
+		LabelApp:          AppName,
+		LabelDefinitionID: definitionID,
 	}
 	selector := metav1.LabelSelector{
 		MatchLabels: selectorLabels,

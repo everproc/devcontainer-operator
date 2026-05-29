@@ -196,7 +196,9 @@ func LoadImageToKindClusterWithName(name string) error {
 		}
 		archivePath := tmpFile.Name()
 		_ = tmpFile.Close()
-		defer os.Remove(archivePath)
+		defer func() {
+			_ = os.Remove(archivePath)
+		}()
 
 		saveCmd := exec.Command(containerTool, "save", "-o", archivePath, name)
 		_, saveErr := Run(saveCmd)
