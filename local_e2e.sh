@@ -1,5 +1,5 @@
 #!/bin/bash
-export CONTAINER_TOOL=podman
+export CONTAINER_TOOL=${CONTAINER_TOOL:-podman}
 export REGISTRY=localhost:5001
 export REPOSITORY=devcontainer-operator
 export IMG_TAG=0.0.10
