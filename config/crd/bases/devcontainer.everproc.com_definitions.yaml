@@ -43,7 +43,7 @@ spec:
             type: string
           metadata:
             type: object
-          pasedDefinition:
+          parsedDefinition:
             description: The parsed devcontainer json.
             properties:
               build:

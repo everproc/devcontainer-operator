@@ -112,7 +112,11 @@ docker-build: ## Build docker image with the manager.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
+ifeq ($(CONTAINER_TOOL),podman)
+	$(CONTAINER_TOOL) push --tls-verify=false ${IMG}
+else
 	$(CONTAINER_TOOL) push ${IMG}
+endif
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -157,7 +161,7 @@ reinstall: uninstall install
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) create -f -
+	$(KUSTOMIZE) build config/default | $(KUBECTL) apply --server-side=true -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -175,14 +179,18 @@ load-utilities-via-kind: build-utilities
 	kind load docker-image parserapp:$(IMG_TAG)
 	kind load docker-image git-clone:$(IMG_TAG)
 
-push-operator-registry: docker-build
-	$(CONTAINER_TOOL) push $(IMG)
+push-operator-registry: docker-build docker-push
 
 push-utilities-registry: build-utilities
 	$(CONTAINER_TOOL) image tag parserapp:$(IMG_TAG) $(REGISTRY)/parserapp:$(IMG_TAG)
 	$(CONTAINER_TOOL) image tag git-clone:$(IMG_TAG) $(REGISTRY)/git-clone:$(IMG_TAG)
+ifeq ($(CONTAINER_TOOL),podman)
+	$(CONTAINER_TOOL) push --tls-verify=false $(REGISTRY)/parserapp:$(IMG_TAG)
+	$(CONTAINER_TOOL) push --tls-verify=false $(REGISTRY)/git-clone:$(IMG_TAG)
+else
 	$(CONTAINER_TOOL) push $(REGISTRY)/parserapp:$(IMG_TAG)
 	$(CONTAINER_TOOL) push $(REGISTRY)/git-clone:$(IMG_TAG)
+endif
 
 ##@ Dependencies
 

@@ -11,6 +11,7 @@ rules:
   - persistentvolumeclaims
   - pods
   - serviceaccounts
+  - services
   verbs:
   - create
   - delete

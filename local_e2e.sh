@@ -1,9 +1,12 @@
-#!/bin/bash
+#!bash
+export CONTAINER_TOOL=${CONTAINER_TOOL:-podman}
 export REGISTRY=localhost:5001
 export REPOSITORY=devcontainer-operator
-export IMG_TAG=0.0.7
+export IMG_TAG=0.0.10
 set -exo pipefail
 go mod tidy
+# Ensure a clean Kind cluster before starting
+kind delete cluster || true
 ./scripts/kind-docker.sh
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 make push-operator-registry

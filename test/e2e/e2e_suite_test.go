@@ -72,6 +72,7 @@ var _ = BeforeSuite(func() {
 
 	By("building the manager(Operator) image")
 	cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("CONTAINER_TOOL=%s", os.Getenv("CONTAINER_TOOL")))
 	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 

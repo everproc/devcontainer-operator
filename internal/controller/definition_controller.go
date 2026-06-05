@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	devcontainerv1alpha1 "everproc.com/devcontainer/api/v1alpha1"
+	"everproc.com/devcontainer/internal/controller/conditions"
 	"everproc.com/devcontainer/internal/controller/state"
 )
 
@@ -417,6 +418,12 @@ func (r *DefinitionReconciler) ensureSetupPod(ctx context.Context, instance *dev
 		log.Info("Parse job is not complete")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+	// Only set the intermediate Ready=False status if we haven't already reached a
+	// fully-reconciled (Ready=True) state. Otherwise we would oscillate between
+	// Ready=False here and Ready=True at the end of Reconcile on every loop.
+	if conditions.IsTrue(devcontainerv1alpha1.DefinitionCondTypeReady, instance.Status.Conditions) {
+		return ctrl.Result{}, nil
+	}
 	if err := r.updateStatus(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance, metav1.Condition{Type: devcontainerv1alpha1.DefinitionCondTypeReady, Status: metav1.ConditionFalse, Reason: "SetupPodFinished", Message: "Setup pod has cloned and parsed data"}); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -770,8 +777,14 @@ func (r *DefinitionReconciler) setupPod(inst *devcontainerv1alpha1.Definition, w
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: UtilServiceAccountName,
-					Containers: []corev1.Container{
+					// Use InitContainers for git-clone so the parser container only
+					// starts after the repo is fully cloned. This prevents the parser
+					// from failing due to a missing devcontainer.json and triggering
+					// unnecessary retries that leave the PVC in a bad state.
+					InitContainers: []corev1.Container{
 						*cloneContainer,
+					},
+					Containers: []corev1.Container{
 						r.parseContainer(inst, definitionID),
 					},
 					RestartPolicy: corev1.RestartPolicyNever,
@@ -873,7 +886,7 @@ func (r *DefinitionReconciler) kanikoJob(inst *devcontainerv1alpha1.Definition, 
 						{
 							Name: "kaniko",
 							// TODO(juf): We should not use latest + make this configurable
-							Image:        "gcr.io/kaniko-project/executor:latest",
+							Image:        KANIKO_IMAGE_NAME,
 							Args:         args,
 							VolumeMounts: volumeMounts,
 						},

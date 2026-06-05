@@ -166,15 +166,54 @@ func IsCertManagerCRDsInstalled() bool {
 	return false
 }
 
-// LoadImageToKindClusterWithName loads a local docker image to the kind cluster
+// LoadImageToKindClusterWithName loads a local image to the kind cluster.
+// It supports both Docker and Podman. When using Podman, it falls back to
+// saving the image to an archive and loading it via kind load image-archive.
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := "kind"
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
 	}
+
+	containerTool := os.Getenv("CONTAINER_TOOL")
+	if containerTool == "" {
+		containerTool = "docker"
+	}
+
+	// Try the standard kind load docker-image first.
 	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
 	cmd := exec.Command("kind", kindOptions...)
 	_, err := Run(cmd)
+	if err == nil {
+		return nil
+	}
+
+	// If using podman and kind load docker-image failed, fall back to archive load.
+	if containerTool == "podman" {
+		tmpFile, tmpErr := os.CreateTemp("", "kind-image-*.tar")
+		if tmpErr != nil {
+			return fmt.Errorf("failed to create temp file for image archive: %w", tmpErr)
+		}
+		archivePath := tmpFile.Name()
+		_ = tmpFile.Close()
+		defer func() {
+			_ = os.Remove(archivePath)
+		}()
+
+		saveCmd := exec.Command(containerTool, "save", "-o", archivePath, name)
+		_, saveErr := Run(saveCmd)
+		if saveErr != nil {
+			return fmt.Errorf("failed to save image with podman: %w", saveErr)
+		}
+
+		loadCmd := exec.Command("kind", "load", "image-archive", archivePath, "--name", cluster)
+		_, loadErr := Run(loadCmd)
+		if loadErr != nil {
+			return fmt.Errorf("failed to load image archive into kind: %w", loadErr)
+		}
+		return nil
+	}
+
 	return err
 }
 
